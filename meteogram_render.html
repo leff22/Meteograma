@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Meteograma GFS — São Sebastião, SP</title>
+<style>
+body{margin:0;background:#0b0f1a;color:#e5e7eb;font-family:Inter,system-ui,Segoe UI,Arial}
+#meteogram{width:100vw;height:72vh}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+<div id="meteogram"></div>
+<script>
+async function loadCSV(path){
+  const r=await fetch(path); const txt=await r.text();
+  const lines=txt.trim().split(/\r?\n/); const header=lines[0].split(",");
+  const rows=lines.slice(1).map(l=>l.split(","));
+  const idxTime=header.indexOf("time");
+  const get=(name)=>{const i=header.indexOf(name); return rows.map(row=>{const v=row[i]; const n=parseFloat(v); return isNaN(n)?null:n});}
+  const time=rows.map(row=>row[idxTime]);
+  return {
+    time,
+    temperature:get("temperature_2m"),
+    dewpoint:get("dewpoint_2m"),
+    precipitation:get("precipitation"),
+    cloudcover:get("cloudcover"),
+    windspeed:get("windspeed_10m"),
+    windgusts:get("windgusts_10m"),
+    winddir:get("winddirection_10m"),
+    pressure:get("pressure_msl"),
+    is_day: rows.map(row=>parseInt(row[header.indexOf("is_day")],10))
+  }
+}
+function buildNightAreas(time,is_day){
+  const areas=[]; let start=null;
+  for(let i=0;i<time.length;i++){
+    const night=is_day[i]===0;
+    if(night && start===null) start=i;
+    if(!night && start!==null){ areas.push([{xAxis:time[start]},{xAxis:time[i-1]}]); start=null; }
+  }
+  if(start!==null) areas.push([{xAxis:time[start]},{xAxis:time[time.length-1]}]);
+  return areas;
+}
+function fmt(n,unit){ if(n==null) return "-"; return `${Math.round(n*10)/10}${unit}` }
+(async()=>{
+  const data=await loadCSV("./data/gfs_sao_sebastiao_hourly.csv");
+  const el=document.getElementById("meteogram");
+  const chart=echarts.init(el,{renderer:"canvas"});
+  const nightAreas=buildNightAreas(data.time,data.is_day);
+  const opt={
+    backgroundColor:"#0b0f1a",
+    grid:{left:60,right:60,top:40,bottom:60},
+    legend:{top:8,textStyle:{color:"#e5e7eb"}},
+    dataZoom:[{type:"inside"},{type:"slider"}],
+    tooltip:{
+      trigger:"axis",
+      formatter:(items)=>{
+        const i=items[0].dataIndex;
+        const parts=[]
+        parts.push(`${data.time[i]}`);
+        parts.push(`Temp: ${fmt(data.temperature[i],"°C")}  Td: ${fmt(data.dewpoint[i],"°C")}`);
+        parts.push(`Vento: ${fmt(data.windspeed[i]," m/s")}  Rajadas: ${fmt(data.windgusts[i]," m/s")}  Dir: ${fmt(data.winddir[i],"°")}`);
+        parts.push(`Pressão: ${fmt(data.pressure[i]," hPa")}`);
+        parts.push(`Nuvens: ${fmt(data.cloudcover[i]," %")}  Precip: ${fmt(data.precipitation[i]," mm/h")}`);
+        return parts.join("<br/>");
+      }
+    },
+    xAxis:{type:"category",data:data.time,axisLine:{lineStyle:{color:"#6b7280"}},axisLabel:{color:"#9ca3af"}},
+    yAxis:[
+      {name:"°C", position:"left", axisLabel:{color:"#fca5a5"}, splitLine:{lineStyle:{color:"#1f2937"}}},
+      {name:"mm/h", position:"right", axisLabel:{color:"#93c5fd"}, splitLine:{show:false}},
+      {name:"m/s", position:"right", offset:60, axisLabel:{color:"#67e8f9"}, splitLine:{show:false}},
+      {name:"hPa", position:"left", offset:60, axisLabel:{color:"#c4b5fd"}, splitLine:{show:false}},
+      {name:"%", position:"right", offset:120, axisLabel:{color:"#d1d5db"}, splitLine:{show:false}}
+    ],
+    series:[
+      {type:"line", name:"Temperatura", data:data.temperature, yAxisIndex:0, smooth:true, symbol:"none", lineStyle:{color:"#ef4444",width:2}},
+      {type:"line", name:"Ponto de orvalho", data:data.dewpoint, yAxisIndex:0, smooth:true, symbol:"none", lineStyle:{color:"#ef4444",width:1,type:"dashed"}},
+      {type:"bar", name:"Precipitação", data:data.precipitation, yAxisIndex:1, itemStyle:{color:"#3b82f6"}},
+      {type:"line", name:"Vento", data:data.windspeed, yAxisIndex:2, smooth:true, symbol:"none", lineStyle:{color:"#22d3ee",width:2}},
+      {type:"line", name:"Rajadas", data:data.windgusts, yAxisIndex:2, smooth:true, symbol:"none", lineStyle:{color:"#22d3ee",width:1,type:"dashed"}},
+      {type:"line", name:"Pressão", data:data.pressure, yAxisIndex:3, smooth:true, symbol:"none", lineStyle:{color:"#8b5cf6",width:1}},
+      {type:"line", name:"Nuvens", data:data.cloudcover, yAxisIndex:4, smooth:true, symbol:"none", areaStyle:{color:"rgba(156,163,175,0.25)"}, lineStyle:{color:"#9ca3af",width:1}}
+    ],
+    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:nightAreas}
+  };
+  chart.setOption(opt);
+})();
+</script>
+</body>
+</html>
