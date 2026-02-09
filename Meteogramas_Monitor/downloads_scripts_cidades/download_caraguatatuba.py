@@ -31,6 +31,31 @@ GFS_VARS = ",".join([
     "cloud_cover_100hPa"
 ])
 
+MARINE_VARS = ",".join([
+    "wave_height",
+    "wave_direction",
+    "wind_wave_height",
+    "wind_wave_direction",
+    "swell_wave_height",
+    "swell_wave_direction",
+])
+
+import time
+
+def fetch_with_retry(url: str, retries: int = 3) -> dict:
+    for i in range(retries):
+        try:
+            with httpx.Client(timeout=60) as cx:
+                r = cx.get(url)
+                r.raise_for_status()
+                return r.json()
+        except httpx.RequestError as e:
+            if i == retries - 1:
+                raise
+            print(f"Erro de conexão ({e}). Tentando novamente ({i+1}/{retries})...")
+            time.sleep(2)
+    return {}
+
 def fetch_gfs(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paulo") -> dict:
     url = (
         "https://api.open-meteo.com/v1/gfs"
@@ -39,16 +64,26 @@ def fetch_gfs(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paul
         f"&timezone={tz}"
         f"&forecast_days={days}"
     )
-    with httpx.Client(timeout=30) as cx:
-        r = cx.get(url)
-        r.raise_for_status()
-        return r.json()
+    return fetch_with_retry(url)
+
+def fetch_marine(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paulo") -> dict:
+    url = (
+        "https://marine-api.open-meteo.com/v1/marine"
+        f"?latitude={lat}&longitude={lon}"
+        f"&hourly={MARINE_VARS}"
+        f"&timezone={tz}"
+        f"&forecast_days={days}"
+    )
+    return fetch_with_retry(url)
 
 def to_dataframe(d: dict) -> pd.DataFrame:
     h = d["hourly"]
     df = pd.DataFrame(h)
     df["time"] = pd.to_datetime(df["time"])
     df = df.set_index("time")
+    return df
+
+def enrich_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "relativehumidity_2m" in df.columns and "temperature_2m" in df.columns:
         T = df["temperature_2m"]
         RH = df["relativehumidity_2m"] / 100.0
@@ -60,18 +95,7 @@ def to_dataframe(d: dict) -> pd.DataFrame:
         rad = np.deg2rad(df["winddirection_10m"])
         df["wind_u10"] = -df["windspeed_10m"] * np.sin(rad)
         df["wind_v10"] = -df["windspeed_10m"] * np.cos(rad)
-    # Simulação: ondas e maré
-    n = len(df)
-    t_hours = (df.index.view('int64') // 3_600_000_000_000) % 24
-    tide_amp = 1.0
-    tide_base = 0.5
-    tide = tide_base + tide_amp * np.sin(2 * np.pi * (t_hours) / 12.42)
-    wave = 0.6 + 0.06 * (df["windspeed_10m"].fillna(0)) + 0.3 * np.sin(2 * np.pi * (t_hours) / 8.0)
-    wave = np.clip(wave, 0.2, None)
-    wdir = (df["winddirection_10m"].fillna(0) + 20) % 360
-    df["wave_height"] = wave.round(2)
-    df["wave_direction"] = wdir.round(0)
-    df["tide_height"] = tide.round(2)
+    
     return df
 
 def save_json(d: dict, path: Path) -> None:
@@ -83,21 +107,25 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
     df.to_csv(path, index=True)
 
 def main():
-    lat = -22.00
-    lon = -47.89
-    data_dir = Path(__file__).parent / "data"
-    raw_path = data_dir / "gfs_sao_carlos_raw.json"
-    csv_path = data_dir / "gfs_sao_carlos_hourly.csv"
-    #raw_path = data_dir / "gfs_sao_sebastiao_raw.json"
-    #csv_path = data_dir / "gfs_sao_sebastiao_hourly.csv"
-
-    d = fetch_gfs(lat, lon, days=7)
-    df = to_dataframe(d)
-    save_json(d, raw_path)
-    save_csv(df, csv_path)
-    print({"rows": len(df), "start": str(df.index.min()), "end": str(df.index.max())})
-    print({"json": str(raw_path), "csv": str(csv_path)})
-    print({"saved_json": raw_path.exists(), "saved_csv": csv_path.exists()})
+    # Coordenadas Caraguatatuba, SP
+    lat, lon = -23.62028, -45.41306
+    print(f"Baixando dados para Caraguatatuba: {lat}, {lon}")
+    
+    gfs = fetch_gfs(lat, lon)
+    marine = fetch_marine(lat, lon)
+    
+    df_gfs = to_dataframe(gfs)
+    df_marine = to_dataframe(marine)
+    
+    df = df_gfs.join(df_marine, how="outer")
+    df = enrich_dataframe(df)
+    
+    # Salva
+    base = Path(__file__).parent
+    save_json(gfs, base / "data" / "gfs_caraguatatuba.json")
+    save_json(marine, base / "data" / "marine_caraguatatuba.json")
+    save_csv(df, base / "data" / "gfs_caraguatatuba_hourly.csv")
+    print("Concluído!")
 
 if __name__ == "__main__":
     main()

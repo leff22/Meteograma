@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="pt-BR">
+  
+<head>
+<meta charset="utf-8" />
+<title>Meteograma Híbrido — Ubatuba, SP</title>
+
+<style>
+  :root{ --bg:#f7f7f7; --fg:#111827; --grid:#e5e7eb; --muted:#6b7280; --temp:#ef4444; --dew:#3b82f6; --wind:#22d3ee; --gust:#06b6d4; --press:#8b5cf6; --rain:#3b82f6; --colw:60px; --table-pad:40px; --chart-pad:5px }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Arial; display:flex; flex-direction:column; min-height:100vh; overflow-y:auto}
+  .wrap{display:flex; flex:1; overflow:visible; width:100%}
+  .footer{padding:8px 12px; border-top:1px solid var(--grid); display:flex; justify-content:flex-end; background:var(--bg)}
+  .labels{width:160px; background:var(--bg); border-right:1px solid var(--grid); position:relative; z-index:3; overflow-y:hidden}
+  .labels .row{height:32px; display:flex; align-items:center; justify-content:flex-end; font-size:12px; color:var(--muted); font-weight:500; letter-spacing:0.02em; line-height:1; padding:0 8px; border-bottom:1px dashed var(--grid)}
+  .stack{width:100%; display:flex; flex-direction:column; align-items:flex-end; gap:3px}
+  .stack-header{display:flex; gap:8px; color:var(--muted)}
+  .stack-header .unit{text-decoration:underline}
+  .stack-item{display:flex; align-items:center; gap:6px}
+  .stack-item .icon{font-size:14px}
+  .stack-item.rain{color:#93c5fd}
+  .stack-item.conv{color:#3b82f6}
+  .stack-item.snow{color:#1e40af}
+  .stack-item.temp{color:#ef4444}
+  .stack-item.dew{color:#3b82f6}
+  .stack-item.wind{color:#22d3ee}
+  .stack-item.gust{color:#06b6d4}
+  .stack-item.dir{color:#334155}
+  .stack-item.press{color:var(--press)}
+  .stack-item.wave{color:#0891b2}
+  .stack-item.wavedir{color:#334155}
+  .labels .row.large{height:40px}
+  .row-day,.row-hours,.row-sky,.row-press{height:32px}
+  .row-wind{height:80px}
+  .row-temp{height:200px}
+  .row-pc{height:200px}
+  .content{flex:1; overflow:auto}
+  .table{width:max-content}
+  table{border-collapse:collapse; width:max-content}
+  th, td{min-width:var(--colw); height:32px; border-bottom:1px dashed var(--grid); text-align:center; font-size:12px; color:var(--fg); position:relative}
+  #tr-wind td{height:80px}
+  thead th{height:32px; color:var(--muted); border-bottom:1px solid var(--grid)}
+  .spacer{min-width:var(--table-pad); background:transparent; border-right:1px solid var(--grid)}
+  .daysep{border-left:2px solid rgba(255,255,255,0.18)}
+  .cell-night{background:rgba(0,0,0,0.06)}
+  .sky{font-size:16px}
+  .press{color:var(--press); font-weight:600}
+  .windbox{display:flex; flex-direction:column; align-items:center; gap:2px}
+  .arrow-svg{width:16px;height:16px; transform-origin:center center}
+  .arrow-row{display:flex; align-items:center; gap:6px}
+  .dir{color:#334155; font-weight:700}
+  .vtxt{color:#075985; font-weight:700; background:rgba(255,255,255,0.6); padding:1px 4px; border-radius:4px}
+  .gust-row{width:100%; padding:2px 0; border-radius:6px}
+  .gust{color:#0e7490; font-weight:700; padding:1px 4px; border-radius:4px; background:transparent}
+  .chart{width:max-content; background:var(--bg)}
+  .panel{height:180px; border-bottom:1px solid var(--grid)}
+  .panel.wind{height:220px}
+  .panel.temp{height:200px}
+  .panel.pc{height:200px; position:relative}
+  .panel.wave{height:140px}
+  .panel.tide{height:140px}
+  .legend-overlay{position:absolute; bottom:5px; left:var(--chart-pad); display:flex; gap:12px; padding:4px 8px; background:rgba(255,255,255,0.7); border-radius:4px; align-items:center; z-index:100; pointer-events:none}
+  .legend-item{display:flex; align-items:center; gap:4px; font-size:10px; color:var(--muted); font-weight:600}
+  .legend-item .box{width:12px; height:10px; border-radius:1px}
+  .header{display:flex; gap:8px; align-items:center; padding:0px 12px; color:var(--muted); border-bottom:1px solid var(--grid)}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+</head>
+
+<body>
+<div class="header">
+  <div id="header-info" style="font-size:10px; line-height:1.1; font-weight:500; min-width:140px; font-size:15px; display:flex; flex-direction:column; justify-content:center">
+    <!-- Populated by JS -->
+  </div>
+  <div style="position:absolute; left:50%; transform:translateX(-50%); text-align:center; font-weight:700; font-size:25px; color:var(--fg)">
+    Meteograma — Ubatuba, SP
+  </div>
+  <img src="geo_logo1.png" style="height:15mm; margin-left:auto">
+</div>
+<div class="wrap">
+  <div class="labels">
+    <div class="row row-day">Dia</div>
+    <div class="row row-hours">Horas</div>
+    <div class="row row-sky">Condição</div>
+    <div class="row row-press">
+      <div class="stack">
+        <div class="stack-header"><span>Pressão</span><span class="unit">(hPa)</span></div>
+      </div>
+    </div>
+    <div class="row row-wind">
+      <div class="stack">
+        <div class="stack-item dir"><span>Direção do vento</span><span class="icon">🧭</span></div>
+        <div class="stack-item wind"><span>Velocidade do vento</span><span class="icon">🌬️</span></div>
+        <div class="stack-item gust"><span>Rajadas de vento</span><span class="icon">💨</span></div>
+      </div>
+    </div>
+    <div class="row row-temp">
+      <div class="stack">
+        <div class="stack-item temp"><span>Temperatura</span><span class="unit">(°C)</span></div>
+        <div class="stack-item dew"><span>Ponto de orvalho</span><span class="unit">(°C)</span></div>
+      </div>
+    </div>
+    <div class="row row-pc">
+      <div class="stack">
+        <div class="stack-header"><span>Nuvens %, chuva</span><span class="unit">mm</span></div>
+        <div class="stack-item rain"><span>Chuva fraca</span><span class="icon">☁️</span></div>
+        <div class="stack-item conv"><span>Chuva moderada</span><span class="icon">🌧️</span></div>
+        <div class="stack-item snow"><span>Chuva intensa</span><span class="icon">⛈️</span></div>
+      </div>
+    </div>
+    <div class="row row-wave">
+      <div class="stack">
+        <div class="stack-item wave"><span>Ondas</span><span class="unit">m</span></div>
+        <div class="stack-item wavedir"><span>Direção</span><span class="icon">🧭</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="content">
+    <div class="table">
+      <table>
+        <thead>
+          <tr id="tr-day"></tr>
+          <tr id="tr-hour"></tr>
+        </thead>
+        <tbody>
+          <tr id="tr-sky"></tr>
+          <tr id="tr-press"></tr>
+          <tr id="tr-wind"></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="chart">
+      <div id="panel-temp" class="panel temp"></div>
+      <div style="position:relative">
+        <div id="panel-pc" class="panel pc"></div>
+        <div class="legend-overlay">
+          <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 0.1)"></span>5-25%</div>
+          <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 0.45)"></span>25-50%</div>
+          <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 0.7)"></span>50-75%</div>
+          <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 0.85)"></span>75-90%</div>
+          <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 1)"></span>>90%</div>
+        </div>
+      </div>
+      <div id="panel-wave" class="panel wave"></div>
+    </div>
+  </div>
+</div>
+<div class="footer">
+  <button onclick="savePng()" style="cursor:pointer; padding:6px 12px; font-size:12px; border:1px solid var(--grid); background:#fff; border-radius:4px; font-weight:600; color:var(--muted)">Salvar PNG 📷</button>
+</div>
+
+<script>
+function parseCSV(txt){
+  // ## Analisa o CSV e extrai colunas para arrays
+  const lines=txt.trim().split(/\r?\n/); const header=lines[0].split(",");
+  const rows=lines.slice(1).map(l=>l.split(","));
+  const idx=(name)=>header.indexOf(name);
+  const num=(v)=>{const n=parseFloat(v); return isNaN(n)?null:n};
+  const getn=(name)=>rows.map(r=>num(r[idx(name)]));
+  const time=rows.map(r=>r[idx("time")]);
+  return {
+    time,
+    temperature:getn("temperature_2m"),
+    dewpoint:getn("dewpoint_2m"),
+    precipitation:getn("precipitation"),
+    cloudcover:getn("cloudcover"),
+    windspeed:getn("windspeed_10m"),
+    windgusts:getn("windgusts_10m"),
+    winddir:getn("winddirection_10m"),
+    pressure:getn("pressure_msl"),
+    waveheight:getn("wave_height"),
+    wavedir:getn("wave_direction"),
+    tideheight:getn("tide"),
+    is_day: rows.map(r=>parseInt(r[idx("is_day")]||"1",10)),
+    cloud_profile: [1000,950,925,900,850,800,700,600,500,400,300,250,200,150,100].map(l=>getn(`cloud_cover_${l}hPa`))
+  }
+}
+function skyIcon(isDay, cloud, precip){
+  // ## Seleciona ícone do tempo (sol, nuvem, chuva)
+  if((precip||0)>=0.2) return isDay? "🌧️":"🌧️";
+  if((cloud||0)>=75) return isDay? "☁️":"☁️";
+  if((cloud||0)>=40) return isDay? "🌤️":"☁️";
+  return isDay? "☀️":"🌙";
+}
+function toLocalDate(s){
+  // ## Converte string ISO para Date
+  const t = s.includes('T') ? s.replace('T',' ') : s;
+  const [date, time] = t.split(' ');
+  const [y,m,d] = date.split('-').map(Number);
+  const [hh,mm,ss] = (time||'00:00:00').split(':').map(Number);
+  return new Date(y, (m||1)-1, d||1, hh||0, mm||0, ss||0);
+}
+function dayName(iso){
+  // ## Formata nome do dia (ex: Segunda 10)
+  const d=toLocalDate(iso);
+  const wd=d.toLocaleDateString('pt-BR',{weekday:'long'});
+  const day=d.getDate();
+  return wd.charAt(0).toUpperCase()+wd.slice(1)+" "+day;
+}
+function kmh(val){ if(val==null) return null; return Math.ceil(val) }
+function fmt(n,unit){ if(n==null) return "-"; return `${Math.round(n*10)/10}${unit}` }
+function niceCeil(n){ if(n==null||!isFinite(n)) return 10; const e=Math.floor(Math.log10(Math.max(1e-6,n))); const b=Math.pow(10,e); const s=n/b; let k; if(s<=1) k=1; else if(s<=2) k=2; else if(s<=5) k=5; else k=10; return k*b; }
+
+function windBg(kmh){
+  // ## Cor de fundo baseada na velocidade do vento
+  const s = kmh || 0;
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  if (s <= 15) return 'linear-gradient(90deg, rgba(156,163,175,0.10) 0%, rgba(156,163,175,0.16) 100%)';
+  let h0, h1, t;
+  if (s < 40) { h0 = 200; h1 = 140; t = (s - 15) / 25; }
+  else if (s < 60) { h0 = 140; h1 = 30; t = (s - 40) / 20; }
+  else if (s < 80) { h0 = 30; h1 = 0; t = (s - 60) / 20; }
+  else if (s < 100) { h0 = 0; h1 = 290; t = (s - 80) / 20; }
+  else { h0 = 290; h1 = 290; t = 1; }
+  const hue = Math.round(h0 + (h1 - h0) * clamp(t, 0, 1));
+  let alpha;
+  if (s < 40) alpha = 0.55 + 0.25 * ((s - 15) / 25);
+  else if (s < 60) alpha = 0.80 + 0.10 * ((s - 40) / 20);
+  else if (s < 80) alpha = 0.90 + 0.05 * ((s - 60) / 20);
+  else if (s < 100) alpha = 0.95 + 0.03 * ((s - 80) / 20);
+  else alpha = 0.98;
+  return `linear-gradient(90deg, rgba(156,163,175,0.10) 0%, hsla(${hue},80%,50%,${clamp(alpha,0.2,0.98)}) 100%)`;
+}
+function dirText(deg){
+  // ## Converte graus para direção textual
+  const dirs=["N","NNE","NE","LNE","L","LSE","SE","SSE","S","SSO","SO","OSO","O","ONO","NO","NNO"];
+  const i=Math.round((deg%360)/22.5)%16;
+  return dirs[i];
+}
+function groupDays(time){
+  // ## Agrupa dados por dia
+  const groups=[]; let current=null;
+  for(let i=0;i<time.length;i++){
+    const d=toLocalDate(time[i]); const key=d.toDateString();
+    if(!current||current.key!==key){ current={key, start:i, end:i}; groups.push(current); }
+    current.end=i;
+  }
+  return groups.map(g=>({ key:g.key, start:g.start, end:g.end, span:g.end-g.start+1, label:dayName(time[g.start]) }));
+}
+function nightAreas(time,is_day){
+  // ## Calcula áreas noturnas para o gráfico
+  const arr=[]; let s=null;
+  for(let i=0;i<time.length;i++){
+    const night=is_day[i]===0;
+    if(night && s===null) s=i;
+    if(!night && s!==null){ arr.push([{xAxis:time[s]},{xAxis:time[i-1]}]); s=null; }
+  }
+  if(s!==null) arr.push([{xAxis:time[s]},{xAxis:time[time.length-1]}]);
+  return arr;
+}
+function aggregate3h(d){
+  // ## Agrega dados de 1h para 3h (média/soma/máx)
+  const out={ time:[], temperature:[], dewpoint:[], precipitation:[], cloudcover:[], windspeed:[], windgusts:[], winddir:[], pressure:[], waveheight:[], wavedir:[], tideheight:[], is_day:[], cloud_profile:[] };
+  const avg=(arr)=>{ const vals=arr.filter(v=>v!=null); if(vals.length===0) return null; return vals.reduce((a,b)=>a+b,0)/vals.length; };
+  const sumv=(arr)=>{ const vals=arr.filter(v=>v!=null); if(vals.length===0) return 0; return vals.reduce((a,b)=>a+b,0); };
+  const maxv=(arr)=>{ const vals=arr.filter(v=>v!=null); if(vals.length===0) return null; return Math.max(...vals); };
+  
+  // Initialize cloud_profile structure
+  if(d.cloud_profile && d.cloud_profile.length > 0) {
+     out.cloud_profile = d.cloud_profile.map(() => []);
+  }
+
+  for(let i=0;i<d.time.length;i+=3){
+    const idxs=[i,i+1,i+2].filter(j=>j<d.time.length);
+    out.time.push(d.time[idxs[0]]);
+    out.temperature.push(avg(idxs.map(j=>d.temperature[j])));
+    out.dewpoint.push(avg(idxs.map(j=>d.dewpoint[j])));
+    out.precipitation.push(sumv(idxs.map(j=>d.precipitation[j])));
+    out.cloudcover.push(avg(idxs.map(j=>d.cloudcover[j])));
+    out.windspeed.push(avg(idxs.map(j=>d.windspeed[j])));
+    out.windgusts.push(maxv(idxs.map(j=>d.windgusts[j])));
+    out.winddir.push(d.winddir[idxs[0]]);
+    out.pressure.push(avg(idxs.map(j=>d.pressure[j])));
+    out.waveheight.push(avg(idxs.map(j=>d.waveheight? d.waveheight[j]:null)));
+    out.wavedir.push(d.wavedir ? d.wavedir[idxs[0]] : null);
+    out.tideheight.push(avg(idxs.map(j=>d.tideheight? d.tideheight[j]:null)));
+    out.is_day.push(d.is_day[idxs[0]]);
+    
+    if(d.cloud_profile) {
+      d.cloud_profile.forEach((levelData, levelIdx) => {
+        out.cloud_profile[levelIdx].push(avg(idxs.map(j=>levelData[j])));
+      });
+    }
+  }
+  return out;
+}
+function syncLabelHeights(){
+  // ## Alinha altura das legendas laterais com a tabela
+  const pairs=[['.row-day','tr-day'],['.row-hours','tr-hour'],['.row-sky','tr-sky'],['.row-press','tr-press'],['.row-wind','tr-wind']];
+  pairs.forEach(([cls,id])=>{const a=document.querySelector(cls), b=document.getElementById(id); if(a&&b) a.style.height=b.offsetHeight+"px";});
+  const rt=document.querySelector('.row-temp'), pt=document.getElementById('panel-temp'); if(rt&&pt) rt.style.height=pt.offsetHeight+"px";
+  const rpc=document.querySelector('.row-pc'), pp=document.getElementById('panel-pc'); if(rpc&&pp) rpc.style.height=pp.offsetHeight+"px";
+  const rw=document.querySelector('.row-wave'), pw=document.getElementById('panel-wave'); if(rw&&pw) rw.style.height=pw.offsetHeight+"px";
+}
+function buildTable(d){
+  // ## Gera HTML da tabela (cabeçalhos, ícones, vento, pressão)
+  const trDay=document.getElementById("tr-day");
+  const trHour=document.getElementById("tr-hour");
+  const trSky=document.getElementById("tr-sky");
+  const trPress=document.getElementById("tr-press");
+  const trWind=document.getElementById("tr-wind");
+  const groups=groupDays(d.time);
+  const spacerTh=document.createElement("th"); spacerTh.className="spacer"; trDay.appendChild(spacerTh);
+  const spacerHour=document.createElement("th"); spacerHour.className="spacer"; trHour.appendChild(spacerHour);
+  const spacerSky=document.createElement("td"); spacerSky.className="spacer"; trSky.appendChild(spacerSky);
+  const spacerPress=document.createElement("td"); spacerPress.className="spacer"; trPress.appendChild(spacerPress);
+  const spacerWind=document.createElement("td"); spacerWind.className="spacer"; trWind.appendChild(spacerWind);
+  groups.forEach(g=>{
+    const th=document.createElement("th"); th.textContent=g.label; th.setAttribute("colspan",String(g.span)); th.classList.add("daysep"); trDay.appendChild(th);
+  });
+  for(let i=0;i<d.time.length;i++){
+    const iso=d.time[i]; const hh=toLocalDate(iso).getHours().toString().padStart(2,"0");
+    const thHour=document.createElement("th"); thHour.textContent=(parseInt(hh,10)%3===0)? hh : ""; if(i>0) thHour.classList.add("daysep"); trHour.appendChild(thHour);
+    const tdSky=document.createElement("td"); if(i>0) tdSky.classList.add("daysep"); if(d.is_day[i]===0) tdSky.classList.add("cell-night");
+    const icon=skyIcon(d.is_day[i]===1, d.cloudcover[i], d.precipitation[i]); const sky=document.createElement("div"); sky.className="sky"; sky.textContent=icon; tdSky.appendChild(sky); trSky.appendChild(tdSky);
+    const tdPress=document.createElement("td"); if(i>0) tdPress.classList.add("daysep"); if(d.is_day[i]===0) tdPress.classList.add("cell-night");
+    const p=document.createElement("div"); p.className="press"; p.textContent=d.pressure[i]!=null? Math.round(d.pressure[i])+"":"-"; tdPress.appendChild(p); trPress.appendChild(tdPress);
+    const tdWind=document.createElement("td"); if(i>0) tdWind.classList.add("daysep"); if(d.is_day[i]===0) tdWind.classList.add("cell-night");
+    const vwind = kmh(d.windspeed[i]);
+    const vgust = kmh(d.windgusts[i]);
+    tdWind.style.background = '';
+    const windBox=document.createElement("div"); windBox.className="windbox";
+    const arrowRow=document.createElement("div"); arrowRow.className="arrow-row";
+    const svg=document.createElementNS("http://www.w3.org/2000/svg","svg"); svg.setAttribute("class","arrow-svg"); svg.setAttribute("viewBox","0 0 24 24");
+    const path=document.createElementNS("http://www.w3.org/2000/svg","path"); path.setAttribute("d","M4 12h12l-4-4m4 4l-4 4"); path.setAttribute("stroke","#22d3ee"); path.setAttribute("stroke-width","2"); path.setAttribute("fill","none");
+    svg.appendChild(path); svg.style.transform=`rotate(${(d.winddir[i] + 90) % 360}deg)`;
+    const dir=document.createElement("div"); dir.className="dir"; dir.textContent=dirText(d.winddir[i]);
+    arrowRow.appendChild(svg); arrowRow.appendChild(dir);
+    const vtxt=document.createElement("div"); vtxt.className="vtxt"; vtxt.textContent=vwind!=null? vwind+" km/h":"-";
+    const gust=document.createElement("div"); gust.className="gust"; gust.textContent=vgust!=null? vgust+" km/h":"-";
+    const gustRow=document.createElement("div"); gustRow.className="gust-row"; gustRow.style.background = windBg(vgust||0); gustRow.appendChild(gust);
+    windBox.appendChild(arrowRow); windBox.appendChild(vtxt); windBox.appendChild(gustRow); tdWind.appendChild(windBox); trWind.appendChild(tdWind);
+
+    
+  }
+  syncLabelHeights();
+}
+function buildCharts(d, d0){
+  // ## Cria gráficos ECharts (Temperatura, Chuva)
+  const styles = getComputedStyle(document.documentElement);
+  const colw=parseInt(styles.getPropertyValue('--colw'));
+  const padLeft=parseInt(styles.getPropertyValue('--chart-pad'));
+  const cols=d.time.length; 
+  const totalW=cols*colw; // align chart width to table hour columns
+  const padRight=20; // left pad equals one column to align split lines with table
+  document.getElementById("panel-temp").style.width=(totalW+padLeft+padRight)+"px";
+  document.getElementById("panel-pc").style.width=(totalW+padLeft+padRight)+"px";
+
+  const night=nightAreas(d.time,d.is_day);
+
+  const tmin=Math.min(...d.temperature.filter(v=>v!=null), ...d.dewpoint.filter(v=>v!=null));
+  const tmax=Math.max(...d.temperature.filter(v=>v!=null), ...d.dewpoint.filter(v=>v!=null));
+  const range=tmax-tmin; const tick= range<=12?1 : range<=24?2 : 3;
+  const ymin=Math.floor(tmin/tick)*tick;
+  const ymax=Math.ceil(tmax/tick)*tick;
+  const pmax=Math.max(...d.precipitation.filter(v=>v!=null));
+  const pmaxNice=niceCeil(pmax);
+  const wmax=Math.max(...d.waveheight.filter(v=>v!=null));
+  const wmaxNice=niceCeil(wmax);
+  const tidemax=Math.max(...d.tideheight.filter(v=>v!=null));
+  const tidemaxNice=niceCeil(tidemax);
+
+  // Update Header Info
+  const tStart = toLocalDate(d0.time[0]);
+  const day = String(tStart.getUTCDate()).padStart(2,'0');
+  const mon = String(tStart.getUTCMonth()+1).padStart(2,'0');
+  const hr = String(tStart.getUTCHours()).padStart(2,'0');
+  const mn = String(tStart.getUTCMinutes()).padStart(2,'0');
+  const runStr = `${day}.${mon} ${hr}:${mn} UTC`;
+  document.getElementById('header-info').innerHTML = 
+    `Lat: -23.43°S &nbsp; Lon: -45.07°W<br>` +
+    `<span style="color:var(--muted)">Rodada: ${runStr}</span>`;
+
+  const c1=echarts.init(document.getElementById("panel-temp"),{renderer:"canvas"});
+  c1.setOption({
+    backgroundColor:"#f7f7f7",
+    grid:{left:padLeft,right:padRight,top:36,bottom:50,containLabel:true},
+    xAxis:{type:"category",data:d.time,axisLabel:{show:false},axisLine:{show:false},axisTick:{show:false, interval:(idx,val)=> toLocalDate(val).getHours()%3===0},splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb"}}},
+    yAxis:{name:"", min:ymin, max:ymax, interval:tick, axisLabel:{formatter: '{value} °C', color:"#fca5a5"}, axisLine:{lineStyle:{color:"#d1d5db"}}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
+    tooltip:{trigger:"axis",formatter:(it)=>{const i=it[0].dataIndex; return `${d.time[i]}<br/>Temp: ${fmt(d.temperature[i],"°C")} · Td: ${fmt(d.dewpoint[i],"°C")}`}},
+    series:[
+      {type:"line", name:"Temperatura", data:d.temperature, smooth:true, symbol:"circle", symbolSize:2, showAllSymbol:true, showSymbol:true, clip:false, zlevel:2, z:3, lineStyle:{color:"#ef4444",width:2}, itemStyle:{opacity:0}, labelLayout:{hideOverlap:false}, emphasis:{label:{show:true}}, label:{show:true, position:"insideTop", distance:6, formatter:(p)=> p.value!=null? `${Math.round(p.value*10)/10}`:"", color:"#ef4444", fontSize:11, fontWeight:"600", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:3}},
+      {type:"line", name:"Td", data:d.dewpoint, smooth:true, symbol:"circle", symbolSize:2, showAllSymbol:true, showSymbol:true, clip:false, zlevel:2, z:3, lineStyle:{color:"#3b82f6",width:1,type:"dashed"}, itemStyle:{opacity:0}, labelLayout:{hideOverlap:false}, emphasis:{label:{show:true}}, label:{show:true, position:"insideBottom", distance:6, formatter:(p)=> p.value!=null? `${Math.round(p.value*10)/10}`:"", color:"#3b82f6", fontSize:11, fontWeight:"600", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:3}}
+    ],
+    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
+  });
+
+  // Ventos como tabela; painel de vento removido
+
+  // Prepare heatmap data (High Resolution Interpolation)
+  const heatmapData = [];
+  
+  // Function to convert pressure (hPa) to altitude (km)
+  const pressToAlt = (p) => 44.33 * (1 - Math.pow(p / 1013.25, 0.1903));
+  
+  // Source Data (Hourly)
+  const srcLevels = [1000,950,925,900,850,800,700,600,500,400,300,250,200,150,100];
+  const srcAlts = srcLevels.map(pressToAlt);
+  const srcTime = d0.time.map(t => toLocalDate(t).getTime());
+  
+  // Target Grid
+  // X: Interpolate to 5min intervals for ultra-smooth gradients
+  // Y: Regular altitude grid every 0.1km from 0 to 16km
+  const xStep = 2 * 60 * 1000; // 2 min in ms
+  const yStep = 0.1; // 0.1 km
+  const yMax = 16.0;
+  
+  if(d0.cloud_profile && d0.cloud_profile.length > 0){
+      const tStart = srcTime[0];
+      const tEnd = srcTime[srcTime.length-1];
+      
+      // Helper: Get value at (t, alt) using bilinear interpolation
+      // Since source is regular in Time but irregular in Alt, we find nearest time indices and nearest alt indices
+      const getValue = (t, alt) => {
+          // Find Time Index
+          let tIdx = (t - tStart) / (srcTime[1] - srcTime[0]); // assuming 1h regular interval
+          let t0 = Math.floor(tIdx);
+          let t1 = Math.min(t0 + 1, srcTime.length - 1);
+          let tRat = tIdx - t0;
+          if(t0 < 0 || t0 >= srcTime.length) return 0;
+
+          // Find Alt Index (Source Alts are sorted ascending? No, 1000hPa is 0.1km, 100hPa is 16km. So SrcAlts is Ascending)
+          // srcLevels: 1000...100 -> srcAlts: 0.1...16
+          // Find pair of alts enclosing 'alt'
+          let a0 = -1, a1 = -1;
+          for(let i=0; i<srcAlts.length-1; i++){
+              if(alt >= srcAlts[i] && alt <= srcAlts[i+1]){
+                  a0 = i; a1 = i+1; break;
+              }
+          }
+          if(a0 === -1) return 0; // Out of range
+
+          const altRat = (alt - srcAlts[a0]) / (srcAlts[a1] - srcAlts[a0]);
+
+          // Bilinear
+          // V00 = profile[a0][t0], V10 = profile[a0][t1]
+          // V01 = profile[a1][t0], V11 = profile[a1][t1]
+          
+          const v00 = d0.cloud_profile[a0][t0] || 0;
+          const v10 = d0.cloud_profile[a0][t1] || 0;
+          const v01 = d0.cloud_profile[a1][t0] || 0;
+          const v11 = d0.cloud_profile[a1][t1] || 0;
+
+          const vTop = v00 + (v10 - v00) * tRat; // Interp horizontally at bottom alt
+          const vBot = v01 + (v11 - v01) * tRat; // Interp horizontally at top alt
+          
+          return vTop + (vBot - vTop) * altRat; // Interp vertically
+      };
+
+      for(let t = tStart; t <= tEnd; t += xStep){
+          for(let alt = 0; alt <= yMax; alt += yStep){
+              const val = getValue(t, alt);
+              if(val >= 5) { // Threshold 5%
+                  heatmapData.push([t, alt, Math.round(val)]);
+              }
+          }
+      }
+  }
+
+  const hasProfile = heatmapData.length > 0;
+
+  // CHART: PC (Cloud + Rain Combined)
+  const c3=echarts.init(document.getElementById("panel-pc"),{renderer:"canvas"});
+  c3.setOption({
+    backgroundColor:"#f7f7f7",
+    grid:{left:padLeft,right:padRight,top:16,bottom:45,containLabel:true},
+    xAxis: [
+        {   // Axis 0: Main 3h axis (Hidden labels, used for Rain Bars and alignment)
+            type:"category",
+            data:d.time,
+            axisLabel:{show:false},
+            axisLine:{show:false},
+            axisTick:{show:false},
+            splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb", z: 50}} // Grid lines on top
+        },
+        {   // Axis 1: High-Res Time Axis for Heatmap
+            type: 'time',
+            min: toLocalDate(d.time[0]).getTime(),
+            max: toLocalDate(d.time[d.time.length-1]).getTime(),
+            axisLabel: {show: false},
+            axisTick: {show: false},
+            axisLine: {show: false},
+            splitLine: {show: false}
+        }
+    ],
+    yAxis: hasProfile ? [
+      {type:"value", name:"km", min:0, max:16, interval:2, axisLabel:{formatter: '{value} km', color:"#6b7280", fontSize:10}, axisTick:{show:false}, axisLine:{show:false}, splitLine:{show:false}},
+      {type:"value", name:"mm", min:0, max:pmaxNice, position:"right", axisLabel:{color:"#3b82f6"}, splitLine:{show:false}}
+    ] : [
+      {name:"mm", min:0, max:pmaxNice, splitNumber:5, axisLabel:{color:"#93c5fd"}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
+      {name:"%", position:"right", axisLabel:{color:"#d1d5db"}, splitLine:{show:false}}
+    ],
+    visualMap: hasProfile ? {
+        type: 'continuous',
+        seriesIndex: 0, // Apply only to Heatmap
+        min: 0,
+        max: 100,
+        range: [5, 100],
+        calculable: false,
+        inRange: {
+            color: ['#f3f4f6', '#9ca3af', '#6b7280', '#374151', '#111827'], // White-ish to Black
+            colorAlpha: [0.1, 0.45, 0.7, 0.85, 1] // Smooth opacity ramp
+        },
+        orient: 'horizontal', left: 'center', bottom: -5, itemWidth: 16, itemHeight: 160, textStyle: { fontSize: 11, color: '#4b5563' }, show: false
+    } : null,
+    tooltip:{trigger:"axis",formatter:(it)=>{
+        const i=it[0].dataIndex; 
+        return `${d.time[i]}<br/>Chuva: ${fmt(d.precipitation[i]," mm")}` + (d.cloudcover ? `<br/>Nuvens (Total): ${fmt(d.cloudcover[i]," %")}` : "");
+    }},
+    series: hasProfile ? [
+      {
+        type: 'heatmap',
+        xAxisIndex: 1,
+        yAxisIndex: 0,
+        data: heatmapData,
+        itemStyle: { borderColor: '#f7f7f7', borderWidth: 0 },
+        tooltip: { show: false },
+        progressive: 2000 // Progressive rendering for performance
+      },
+      {
+        type:"bar", name:"Chuva", data:d.precipitation, xAxisIndex: 0, yAxisIndex:1, 
+        itemStyle:{
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                {offset: 0, color: '#3b82f6'}, // Blue top
+                {offset: 1, color: '#a855f7'}  // Purple bottom
+            ]),
+            opacity: 0.9,
+            borderRadius: [4, 4, 0, 0]
+        }, 
+        barWidth: '80%',
+        z: 20,
+        label:{show:true, position:"top", formatter:(p)=> p.value>0? `${Math.round(p.value*10)/10}`:"", color:"#1e40af", fontSize:12, fontWeight:"bold", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:4}
+      }
+    ] : [
+      {type:"line", name:"Nuvens", data:d.cloudcover, yAxisIndex:1, smooth:true, symbol:"none", z: 1, areaStyle:{color:"rgba(156,163,175,0.45)"}, lineStyle:{color:"#9ca3af",width:1}},
+      {type:"bar", name:"Chuva", data:d.precipitation, yAxisIndex:0, z: 2, itemStyle:{color:"#3b82f6"}, label:{show:true, position:"top", formatter:(p)=> p.value>0? `${Math.round(p.value*10)/10}`:"", color:"#1e40af", fontSize:12, fontWeight:"700", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:3}}
+    ],
+    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
+  });
+
+  // CHART: Waves
+  document.getElementById("panel-wave").style.width=(totalW+padLeft+padRight)+"px";
+  const c_wave=echarts.init(document.getElementById("panel-wave"),{renderer:"canvas"});
+  
+  const waveArrows = d.wavedir.map((dir, i) => {
+     if (dir == null || d.waveheight[i] == null) return null;
+     return {
+        value: [d.time[i], d.waveheight[i]],
+        symbolRotate: -(dir + 180) 
+     };
+  });
+
+  c_wave.setOption({
+    backgroundColor:"#f7f7f7",
+    grid:{left:padLeft,right:padRight,top:20,bottom:20,containLabel:true},
+    xAxis:{type:"category",data:d.time,axisLabel:{show:false},axisLine:{show:false},axisTick:{show:false},splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb"}}},
+    yAxis:{name:"", min:0, max: Math.max(2, wmaxNice), interval: 0.5, axisLabel:{color:"#0891b2"}, axisLine:{show:false}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
+    series:[
+      {
+        name:'Altura', type:'line', smooth:true, showSymbol:false,
+        lineStyle:{width:2, color:'#0891b2'},
+        areaStyle:{color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0, color:'rgba(8,145,178,0.4)'}, {offset:1, color:'rgba(8,145,178,0.1)'}])},
+        data: d.waveheight
+      },
+      {
+        name:'Direção', type:'scatter',
+        symbol: 'path://M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z', 
+        symbolSize: 14,
+        itemStyle: { color: '#0e7490' },
+        data: waveArrows,
+        z: 10
+      }
+    ],
+    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
+  });
+
+  echarts.connect([c1, c3, c_wave]);
+
+  syncLabelHeights();
+  window.addEventListener('resize', () => { c1.resize(); c3.resize(); c_wave.resize(); });
+}
+(async function(){
+  // ## Carrega CSV, processa e inicia renderização
+  const r=await fetch("./data/gfs_ubatuba_hourly.csv"); const txt=await r.text();
+  const d0=parseCSV(txt);
+  const d=aggregate3h(d0);
+  buildTable(d);
+  buildCharts(d, d0);
+  window.addEventListener('resize', syncLabelHeights);
+})();
+
+function savePng(){
+  const wrap = document.querySelector('.wrap');
+  const footer = document.querySelector('.footer');
+  
+  // ## Salva o estado original
+  const originalOverflow = wrap.style.overflow;
+  const content = document.querySelector('.content');
+  const labels = document.querySelector('.labels');
+  
+  const cOverflow = content.style.overflow;
+  const wHeight = wrap.style.height;
+  const lPos = labels.style.position;
+  const fDisplay = footer ? footer.style.display : '';
+  
+  // ## Expande o layout
+  content.style.overflow = 'visible';
+  wrap.style.height = 'auto';
+  wrap.style.overflow = 'visible';
+  labels.style.position = 'relative';
+  labels.style.height = content.scrollHeight + 'px';
+  if(footer) footer.style.display = 'none';
+  
+  // ## Captura
+  html2canvas(document.body, {
+    scale: 2, 
+    backgroundColor: "#f7f7f7",
+    windowWidth: document.body.scrollWidth,
+    windowHeight: document.body.scrollHeight
+  }).then(canvas => {
+    // ## Restaura
+    content.style.overflow = cOverflow;
+    wrap.style.height = wHeight;
+    wrap.style.overflow = originalOverflow;
+    labels.style.position = lPos;
+    labels.style.height = '';
+    if(footer) footer.style.display = fDisplay;
+    
+    // ## Cria Canvas A4 Paisagem (3508x2480 px @ 300DPI)
+    const a4W = 3508;
+    const a4H = 2480;
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = a4W;
+    finalCanvas.height = a4H;
+    const ctx = finalCanvas.getContext('2d');
+    
+    // Preenche fundo branco
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, a4W, a4H);
+    
+    // Calcula escala para encaixar (contain)
+    const scale = Math.min(a4W / canvas.width, a4H / canvas.height);
+    const dw = canvas.width * scale;
+    const dh = canvas.height * scale;
+    const dx = (a4W - dw) / 2;
+    const dy = (a4H - dh) / 2;
+    
+    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, dw, dh);
+    
+    const a = document.createElement('a');
+    a.download = 'meteograma_sao_carlos_A4.png';
+    a.href = finalCanvas.toDataURL('image/png');
+    a.click();
+  });
+}
+
+// Sincronização de scroll entre labels e conteúdo
+(function() {
+  const lbl = document.querySelector('.labels');
+  const cnt = document.querySelector('.content');
+  let isSyncing = false;
+  
+  const sync = (src, dst) => {
+    if (!isSyncing) {
+      isSyncing = true;
+      dst.scrollTop = src.scrollTop;
+      requestAnimationFrame(() => isSyncing = false);
+    }
+  };
+  
+  if(cnt && lbl){
+    cnt.addEventListener('scroll', () => sync(cnt, lbl));
+    lbl.addEventListener('scroll', () => sync(lbl, cnt));
+  }
+})();
+</script>
+</body>
+</html>

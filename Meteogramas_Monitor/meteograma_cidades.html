@@ -3,7 +3,7 @@
   
 <head>
 <meta charset="utf-8" />
-<title>Meteograma Híbrido — São Carlos, SP</title>
+<title>Meteograma Híbrido — Caraguatatuba, SP</title>
 
 <style>
   :root{ --bg:#f7f7f7; --fg:#111827; --grid:#e5e7eb; --muted:#6b7280; --temp:#ef4444; --dew:#3b82f6; --wind:#22d3ee; --gust:#06b6d4; --press:#8b5cf6; --rain:#3b82f6; --colw:60px; --table-pad:40px; --chart-pad:5px }
@@ -27,6 +27,8 @@
   .stack-item.gust{color:#06b6d4}
   .stack-item.dir{color:#334155}
   .stack-item.press{color:var(--press)}
+  .stack-item.wave{color:#0891b2}
+  .stack-item.wavedir{color:#334155}
   .labels .row.large{height:40px}
   .row-day,.row-hours,.row-sky,.row-press{height:32px}
   .row-wind{height:80px}
@@ -69,10 +71,9 @@
 <body>
 <div class="header">
   <div id="header-info" style="font-size:10px; line-height:1.1; font-weight:500; min-width:140px; font-size:15px; display:flex; flex-direction:column; justify-content:center">
-    <!-- Populated by JS -->
   </div>
-  <div style="position:absolute; left:50%; transform:translateX(-50%); text-align:center; font-weight:700; font-size:25px; color:var(--fg)">
-    Meteograma — São Carlos, SP
+  <div id="title-main" style="position:absolute; left:50%; transform:translateX(-50%); text-align:center; font-weight:700; font-size:25px; color:var(--fg)">
+    Meteograma
   </div>
   <img src="geo_logo1.png" style="height:15mm; margin-left:auto">
 </div>
@@ -107,6 +108,12 @@
         <div class="stack-item snow"><span>Chuva intensa</span><span class="icon">⛈️</span></div>
       </div>
     </div>
+    <div class="row row-wave">
+      <div class="stack">
+        <div class="stack-item wave"><span>Ondas</span><span class="unit">m</span></div>
+        <div class="stack-item wavedir"><span>Direção</span><span class="icon">🧭</span></div>
+      </div>
+    </div>
   </div>
   <div class="content">
     <div class="table">
@@ -134,6 +141,7 @@
           <div class="legend-item"><span class="box" style="background:rgba(17, 24, 39, 1)"></span>>90%</div>
         </div>
       </div>
+      <div id="panel-wave" class="panel wave"></div>
     </div>
   </div>
 </div>
@@ -142,6 +150,57 @@
 </div>
 
 <script>
+const LOCATIONS = {
+  pousoalegre: {
+    name: "Pouso Alegre, MG",
+    latLabel: "-22.23°S",
+    lonLabel: "-45.94°W",
+    csv: "./data/gfs_pousoalegre_hourly.csv",
+    png: "meteograma_pouso_alegre_A4.png"
+  },
+  caraguatatuba: {
+    name: "Caraguatatuba, SP",
+    latLabel: "-23.62°S",
+    lonLabel: "-45.41°W",
+    csv: "./data/gfs_caraguatatuba_hourly.csv",
+    png: "meteograma_caraguatatuba_A4.png"
+  },
+  carapicuiba: {
+    name: "Carapicuíba, SP",
+    latLabel: "-23.52°S",
+    lonLabel: "-46.84°W",
+    csv: "./data/gfs_carapicuiba_hourly.csv",
+    png: "meteograma_carapicuiba_A4.png"
+  },
+  saocarlos: {
+    name: "São Carlos, SP",
+    latLabel: "-22.00°S",
+    lonLabel: "-47.89°W",
+    csv: "./data/gfs_sao_carlos_hourly.csv",
+    png: "meteograma_sao_carlos_A4.png"
+  },
+  ubatuba: {
+    name: "Ubatuba, SP",
+    latLabel: "-23.43°S",
+    lonLabel: "-45.07°W",
+    csv: "./data/gfs_ubatuba_hourly.csv",
+    png: "meteograma_ubatuba_A4.png"
+  },
+  saosebastiao: {
+    name: "São Sebastião, SP",
+    latLabel: "-23.80°S",
+    lonLabel: "-45.40°W",
+    csv: "./data/gfs_sao_sebastiao_hourly.csv",
+    png: "meteograma_sao_sebastiao_A4.png"
+  }
+};
+const params = new URLSearchParams(window.location.search);
+const cityKey = params.get("city") || "pousoalegre";
+const locationCfg = LOCATIONS[cityKey] || LOCATIONS["pousoalegre"];
+const titleEl = document.getElementById("title-main");
+if (titleEl) titleEl.textContent = "Meteograma — " + locationCfg.name;
+document.title = "Meteograma Híbrido — " + locationCfg.name;
+
 function parseCSV(txt){
   // ## Analisa o CSV e extrai colunas para arrays
   const lines=txt.trim().split(/\r?\n/); const header=lines[0].split(",");
@@ -264,7 +323,7 @@ function aggregate3h(d){
     out.winddir.push(d.winddir[idxs[0]]);
     out.pressure.push(avg(idxs.map(j=>d.pressure[j])));
     out.waveheight.push(avg(idxs.map(j=>d.waveheight? d.waveheight[j]:null)));
-    out.wavedir.push(d.winddir[idxs[0]]);
+    out.wavedir.push(d.wavedir ? d.wavedir[idxs[0]] : null);
     out.tideheight.push(avg(idxs.map(j=>d.tideheight? d.tideheight[j]:null)));
     out.is_day.push(d.is_day[idxs[0]]);
     
@@ -276,12 +335,49 @@ function aggregate3h(d){
   }
   return out;
 }
+function filterToSaturday(d){
+  const idxs=[];
+  for(let i=0;i<d.time.length;i++){
+    const dt=toLocalDate(d.time[i]);
+    if(dt.getDay()===6) idxs.push(i);
+  }
+  if(idxs.length===0) return d;
+  const ref=toLocalDate(d.time[idxs[0]]);
+  const y=ref.getFullYear();
+  const m=ref.getMonth();
+  const da=ref.getDate();
+  const dayIdxs=[];
+  for(let i=0;i<d.time.length;i++){
+    const dt=toLocalDate(d.time[i]);
+    if(dt.getFullYear()===y && dt.getMonth()===m && dt.getDate()===da) dayIdxs.push(i);
+  }
+  if(dayIdxs.length===0) return d;
+  const pick=(arr)=>dayIdxs.map(i=>arr[i]);
+  const out={
+    time:pick(d.time),
+    temperature:pick(d.temperature),
+    dewpoint:pick(d.dewpoint),
+    precipitation:pick(d.precipitation),
+    cloudcover:pick(d.cloudcover),
+    windspeed:pick(d.windspeed),
+    windgusts:pick(d.windgusts),
+    winddir:pick(d.winddir),
+    pressure:pick(d.pressure),
+    waveheight:pick(d.waveheight),
+    wavedir:pick(d.wavedir),
+    tideheight:pick(d.tideheight),
+    is_day:pick(d.is_day),
+    cloud_profile:d.cloud_profile && d.cloud_profile.length>0 ? d.cloud_profile.map(level=>pick(level)) : d.cloud_profile
+  };
+  return out;
+}
 function syncLabelHeights(){
   // ## Alinha altura das legendas laterais com a tabela
   const pairs=[['.row-day','tr-day'],['.row-hours','tr-hour'],['.row-sky','tr-sky'],['.row-press','tr-press'],['.row-wind','tr-wind']];
   pairs.forEach(([cls,id])=>{const a=document.querySelector(cls), b=document.getElementById(id); if(a&&b) a.style.height=b.offsetHeight+"px";});
   const rt=document.querySelector('.row-temp'), pt=document.getElementById('panel-temp'); if(rt&&pt) rt.style.height=pt.offsetHeight+"px";
   const rpc=document.querySelector('.row-pc'), pp=document.getElementById('panel-pc'); if(rpc&&pp) rpc.style.height=pp.offsetHeight+"px";
+  const rw=document.querySelector('.row-wave'), pw=document.getElementById('panel-wave'); if(rw&&pw) rw.style.height=pw.offsetHeight+"px";
 }
 function buildTable(d){
   // ## Gera HTML da tabela (cabeçalhos, ícones, vento, pressão)
@@ -327,7 +423,6 @@ function buildTable(d){
   syncLabelHeights();
 }
 function buildCharts(d, d0){
-  // ## Cria gráficos ECharts (Temperatura, Chuva)
   const styles = getComputedStyle(document.documentElement);
   const colw=parseInt(styles.getPropertyValue('--colw'));
   const padLeft=parseInt(styles.getPropertyValue('--chart-pad'));
@@ -351,7 +446,6 @@ function buildCharts(d, d0){
   const tidemax=Math.max(...d.tideheight.filter(v=>v!=null));
   const tidemaxNice=niceCeil(tidemax);
 
-  // Update Header Info
   const tStart = toLocalDate(d0.time[0]);
   const day = String(tStart.getUTCDate()).padStart(2,'0');
   const mon = String(tStart.getUTCMonth()+1).padStart(2,'0');
@@ -359,7 +453,7 @@ function buildCharts(d, d0){
   const mn = String(tStart.getUTCMinutes()).padStart(2,'0');
   const runStr = `${day}.${mon} ${hr}:${mn} UTC`;
   document.getElementById('header-info').innerHTML = 
-    `Lat: -22.02°S &nbsp; Lon: -47.89°W<br>` +
+    `Lat: ${locationCfg.latLabel} &nbsp; Lon: ${locationCfg.lonLabel}<br>` +
     `<span style="color:var(--muted)">Rodada: ${runStr}</span>`;
 
   const c1=echarts.init(document.getElementById("panel-temp"),{renderer:"canvas"});
@@ -528,13 +622,51 @@ function buildCharts(d, d0){
     ],
     markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
   });
+  // CHART: Waves
+  document.getElementById("panel-wave").style.width=(totalW+padLeft+padRight)+"px";
+  const c_wave=echarts.init(document.getElementById("panel-wave"),{renderer:"canvas"});
+  
+  const waveArrows = d.wavedir.map((dir, i) => {
+     if (dir == null || d.waveheight[i] == null) return null;
+     return {
+        value: [d.time[i], d.waveheight[i]],
+        symbolRotate: -(dir + 180) 
+     };
+  });
+
+  c_wave.setOption({
+    backgroundColor:"#f7f7f7",
+    grid:{left:padLeft,right:padRight,top:20,bottom:20,containLabel:true},
+    xAxis:{type:"category",data:d.time,axisLabel:{show:false},axisLine:{show:false},axisTick:{show:false},splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb"}}},
+    yAxis:{name:"", min:0, max: Math.max(2, wmaxNice), interval: 0.5, axisLabel:{color:"#0891b2"}, axisLine:{show:false}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
+    series:[
+      {
+        name:'Altura', type:'line', smooth:true, showSymbol:false,
+        lineStyle:{width:2, color:'#0891b2'},
+        areaStyle:{color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0, color:'rgba(8,145,178,0.4)'}, {offset:1, color:'rgba(8,145,178,0.1)'}])},
+        data: d.waveheight
+      },
+      {
+        name:'Direção', type:'scatter',
+        symbol: 'path://M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z', 
+        symbolSize: 14,
+        itemStyle: { color: '#0e7490' },
+        data: waveArrows,
+        z: 10
+      }
+    ],
+    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
+  });
+
+  echarts.connect([c1, c3, c_wave]);
+
   syncLabelHeights();
-}
-(async function(){
-  // ## Carrega CSV, processa e inicia renderização
-  const r=await fetch("./data/gfs_sao_carlos_hourly.csv"); const txt=await r.text();
+  window.addEventListener('resize', () => { c1.resize(); c3.resize(); c_wave.resize(); });
+}(async function(){
+  const r=await fetch(locationCfg.csv); const txt=await r.text();
   const d0=parseCSV(txt);
-  const d=aggregate3h(d0);
+  let d=aggregate3h(d0);
+  d=filterToSaturday(d);
   buildTable(d);
   buildCharts(d, d0);
   window.addEventListener('resize', syncLabelHeights);
@@ -542,46 +674,65 @@ function buildCharts(d, d0){
 
 function savePng(){
   const wrap = document.querySelector('.wrap');
+  const footer = document.querySelector('.footer');
   
-  // ## Salva o estado original do overflow e altura para restaurar depois
+  // ## Salva o estado original
   const originalOverflow = wrap.style.overflow;
-  const originalHeight = wrap.style.height;
-  
   const content = document.querySelector('.content');
   const labels = document.querySelector('.labels');
   
-  // ## Armazena estilos originais dos elementos internos
   const cOverflow = content.style.overflow;
   const wHeight = wrap.style.height;
   const lPos = labels.style.position;
+  const fDisplay = footer ? footer.style.display : '';
   
-  // ## Expande o layout para capturar todo o conteúdo (remove scrollbars)
-  content.style.overflow = 'visible'; // Permite que o conteúdo vaze para ser capturado
-  wrap.style.height = 'auto';         // Ajusta altura ao conteúdo total
-  wrap.style.overflow = 'visible';    // Remove corte de overflow do container principal
+  // ## Expande o layout
+  content.style.overflow = 'visible';
+  wrap.style.height = 'auto';
+  wrap.style.overflow = 'visible';
+  labels.style.position = 'relative';
+  labels.style.height = content.scrollHeight + 'px';
+  if(footer) footer.style.display = 'none';
   
-  // ## Ajusta a coluna de legendas (labels)
-  labels.style.position = 'relative'; // Remove 'sticky' temporariamente para não flutuar na captura
-  labels.style.height = content.scrollHeight + 'px'; // Força altura igual ao conteúdo total da tabela/gráficos
-  
-  // ## Gera a captura de tela usando html2canvas
-    html2canvas(document.body, {
-      scale: 3, // Aumenta a resolução da imagem
-      backgroundColor: "#f7f7f7",
-      windowWidth: document.body.scrollWidth,  // Define largura total do documento
-    windowHeight: document.body.scrollHeight // Define altura total do documento
+  // ## Captura
+  html2canvas(document.body, {
+    scale: 2, 
+    backgroundColor: "#f7f7f7",
+    windowWidth: document.body.scrollWidth,
+    windowHeight: document.body.scrollHeight
   }).then(canvas => {
-    // ## Restaura os estilos originais para voltar ao layout com scroll
+    // ## Restaura
     content.style.overflow = cOverflow;
     wrap.style.height = wHeight;
     wrap.style.overflow = originalOverflow;
     labels.style.position = lPos;
     labels.style.height = '';
+    if(footer) footer.style.display = fDisplay;
     
-    // ## Cria um link temporário e força o download da imagem
+    // ## Cria Canvas A4 Paisagem (3508x2480 px @ 300DPI)
+    const a4W = 3508;
+    const a4H = 2480;
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = a4W;
+    finalCanvas.height = a4H;
+    const ctx = finalCanvas.getContext('2d');
+    
+    // Preenche fundo branco
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, a4W, a4H);
+    
+    // Calcula escala para encaixar (contain)
+    const scale = Math.min(a4W / canvas.width, a4H / canvas.height);
+    const dw = canvas.width * scale;
+    const dh = canvas.height * scale;
+    const dx = (a4W - dw) / 2;
+    const dy = (a4H - dh) / 2;
+    
+    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, dw, dh);
+    
     const a = document.createElement('a');
-    a.download = 'meteograma_sao_carlos.png';
-    a.href = canvas.toDataURL('image/png');
+    a.download = locationCfg.png;
+    a.href = finalCanvas.toDataURL('image/png');
     a.click();
   });
 }
