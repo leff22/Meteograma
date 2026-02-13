@@ -4,6 +4,8 @@ import httpx
 import pandas as pd
 import numpy as np
 import time
+import argparse
+import sys
 
 GFS_VARS = ",".join([
     "temperature_2m",
@@ -118,40 +120,63 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
     df.to_csv(path, index=True)
 
 def main():
-    # Coordenadas Ubatuba
-    lat = -25.7836
-    lon = -80.1432
-    data_dir = Path(__file__).parent / "data"
-    raw_path = data_dir / "gfs_ubatuba_raw.json"
-    csv_path = data_dir / "gfs_ubatuba_hourly.csv"
+    parser = argparse.ArgumentParser(description='Download weather data for specific coordinates.')
+    parser.add_argument('--lat', type=float, required=True, help='Latitude')
+    parser.add_argument('--lon', type=float, required=True, help='Longitude')
+    parser.add_argument('--name', type=str, default='dynamic', help='Location name for file naming')
+    parser.add_argument('--days', type=int, default=7, help='Forecast days')
+    
+    args = parser.parse_args()
 
-    print(f"Baixando dados para Ubatuba ({lat}, {lon})...")
+    lat = args.lat
+    lon = args.lon
+    name = args.name.lower().replace(" ", "_")
+    days = args.days
+    
+    data_dir = Path(__file__).parent / "data"
+    raw_path = data_dir / f"gfs_{name}_raw.json"
+    csv_path = data_dir / f"gfs_{name}_hourly.csv"
+
+    print(f"Baixando dados para {args.name} ({lat}, {lon})...")
     try:
-        d = fetch_gfs(lat, lon, days=7)
+        d = fetch_gfs(lat, lon, days=days)
         df = to_dataframe(d)
 
         # Fetch Marine data (add waves, etc.)
         try:
-            d_marine = fetch_marine(lat, lon, days=7)
+            d_marine = fetch_marine(lat, lon, days=days)
             df_marine = to_dataframe(d_marine)
             # Merge marine data into main dataframe
             # Use join to align on index (time)
             df = df.join(df_marine, rsuffix="_marine")
             print("Dados marinhos mesclados com sucesso.")
         except Exception as e:
-            print(f"Warning: Could not fetch marine data: {e}")
+            print(f"Warning: Could not fetch marine data (might be inland): {e}")
 
         df = enrich_dataframe(df)
         
         save_json(d, raw_path)
         save_csv(df, csv_path)
-        print({"rows": len(df), "start": str(df.index.min()), "end": str(df.index.max())})
-        print({"json": str(raw_path), "csv": str(csv_path)})
-        print({"saved_json": raw_path.exists(), "saved_csv": csv_path.exists()})
-        print("Download concluído com sucesso!")
+        
+        result = {
+            "status": "success",
+            "rows": len(df),
+            "start": str(df.index.min()),
+            "end": str(df.index.max()),
+            "json": str(raw_path),
+            "csv": str(csv_path),
+            "lat": lat,
+            "lon": lon
+        }
+        print(json.dumps(result))
         
     except Exception as e:
-        print(f"Erro fatal no download: {e}")
+        error_result = {
+            "status": "error",
+            "message": str(e)
+        }
+        print(json.dumps(error_result))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

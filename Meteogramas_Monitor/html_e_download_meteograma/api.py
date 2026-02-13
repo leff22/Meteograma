@@ -1,9 +1,23 @@
-from pathlib import Path
-import json
-import httpx
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
 import pandas as pd
 import numpy as np
+import httpx
 import time
+import json
+
+import os
+
+# Define the path to the parent directory (Meteogramas_Monitor)
+# This assumes api.py is in downloads_scripts_cidades
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+app = Flask(__name__, static_folder=BASE_DIR, static_url_path="/")
+CORS(app)  # Enable CORS for all routes
+
+@app.route("/")
+def index():
+    return app.send_static_file("meteogram.html")
 
 GFS_VARS = ",".join([
     "temperature_2m",
@@ -59,7 +73,7 @@ def fetch_gfs(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paul
                 return r.json()
         except Exception as e:
             if i < attempts - 1:
-                print(f"Erro ao baixar GFS (tentativa {i+1}/{attempts}): {e}. Retentando em 2s...")
+                print(f"Error downloading GFS (attempt {i+1}/{attempts}): {e}. Retrying in 2s...")
                 time.sleep(2)
             else:
                 raise e
@@ -82,7 +96,7 @@ def fetch_marine(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_P
                 return r.json()
         except Exception as e:
             if i < attempts - 1:
-                print(f"Erro ao baixar Marine (tentativa {i+1}/{attempts}): {e}. Retentando em 2s...")
+                print(f"Error downloading Marine data (attempt {i+1}/{attempts}): {e}. Retrying in 2s...")
                 time.sleep(2)
             else:
                 raise e
@@ -109,49 +123,44 @@ def enrich_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-def save_json(d: dict, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(d, ensure_ascii=False))
-
-def save_csv(df: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=True)
-
-def main():
-    # Coordenadas Ubatuba
-    lat = -25.7836
-    lon = -80.1432
-    data_dir = Path(__file__).parent / "data"
-    raw_path = data_dir / "gfs_ubatuba_raw.json"
-    csv_path = data_dir / "gfs_ubatuba_hourly.csv"
-
-    print(f"Baixando dados para Ubatuba ({lat}, {lon})...")
+@app.route("/meteogram", methods=["GET"])
+def get_meteogram():
     try:
-        d = fetch_gfs(lat, lon, days=7)
+        lat = request.args.get("lat", type=float)
+        lon = request.args.get("lon", type=float)
+        days = request.args.get("days", 7, type=int)
+        data_format = request.args.get("format", "csv")
+        
+        if lat is None or lon is None:
+            return jsonify({"error": "Missing lat or lon parameters"}), 400
+            
+        # Fetch GFS
+        d = fetch_gfs(lat, lon, days=days)
         df = to_dataframe(d)
 
         # Fetch Marine data (add waves, etc.)
         try:
-            d_marine = fetch_marine(lat, lon, days=7)
+            d_marine = fetch_marine(lat, lon, days=days)
             df_marine = to_dataframe(d_marine)
             # Merge marine data into main dataframe
             # Use join to align on index (time)
             df = df.join(df_marine, rsuffix="_marine")
-            print("Dados marinhos mesclados com sucesso.")
         except Exception as e:
-            print(f"Warning: Could not fetch marine data: {e}")
+            print(f"Warning: Could not fetch marine data (might be inland): {e}")
 
         df = enrich_dataframe(df)
         
-        save_json(d, raw_path)
-        save_csv(df, csv_path)
-        print({"rows": len(df), "start": str(df.index.min()), "end": str(df.index.max())})
-        print({"json": str(raw_path), "csv": str(csv_path)})
-        print({"saved_json": raw_path.exists(), "saved_csv": csv_path.exists()})
-        print("Download concluído com sucesso!")
-        
+        if data_format == "json":
+            return jsonify(json.loads(df.to_json(orient="index", date_format="iso")))
+        else:
+            csv_data = df.to_csv(index=True)
+            response = make_response(csv_data)
+            response.headers["Content-Disposition"] = "attachment; filename=meteogram.csv"
+            response.headers["Content-Type"] = "text/csv"
+            return response
+
     except Exception as e:
-        print(f"Erro fatal no download: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True, port=5000)
