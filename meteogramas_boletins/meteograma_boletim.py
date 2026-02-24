@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # Backend para gerar arquivos sem janela
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import gridspec
@@ -14,7 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap
 import json
 import httpx
 
-# Configuração de Locale
+# Locale configuration
 try:
     locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
 except Exception:
@@ -23,7 +23,7 @@ except Exception:
     except Exception:
         pass
 
-# --- CONSTANTES DE DOWNLOAD (Do download_dados.py) ---
+# --- DOWNLOAD CONSTANTS (from download_dados.py) ---
 GFS_VARS = ",".join([
     "temperature_2m",
     "relativehumidity_2m",
@@ -60,7 +60,7 @@ MARINE_VARS = ",".join([
     "swell_wave_direction",
 ])
 
-# --- FUNÇÕES DE DOWNLOAD ---
+# --- DOWNLOAD FUNCTIONS ---
 def fetch_gfs(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paulo") -> dict:
     url = (
         "https://api.open-meteo.com/v1/gfs"
@@ -69,11 +69,11 @@ def fetch_gfs(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paul
         f"&timezone={tz}"
         f"&forecast_days={days}"
     )
-    print(f"Baixando dados de: {url}")
-    with httpx.Client(timeout=30) as cx:
-        r = cx.get(url)
+    with httpx.Client(timeout=60.0) as client:
+        r = client.get(url)
         r.raise_for_status()
         return r.json()
+
 
 def fetch_marine(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_Paulo") -> dict:
     url = (
@@ -83,9 +83,8 @@ def fetch_marine(lat: float, lon: float, days: int = 7, tz: str = "America/Sao_P
         f"&timezone={tz}"
         f"&forecast_days={days}"
     )
-    print(f"Baixando dados marinhos de: {url}")
-    with httpx.Client(timeout=30) as cx:
-        r = cx.get(url)
+    with httpx.Client(timeout=60.0) as client:
+        r = client.get(url)
         r.raise_for_status()
         return r.json()
 
@@ -129,9 +128,9 @@ def load_tide_table() -> pd.DataFrame:
     df = df.set_index('data_hora')[['altura']]
     return df
 
-# --- FUNÇÕES DE PROCESSAMENTO E GRÁFICO (Do generate_meteogram.py) ---
+# --- PROCESSING AND PLOTTING FUNCTIONS (from generate_meteogram.py) ---
 def aggregate_12h(df):
-    # Agrega dados horários para blocos de 12h
+    # Aggregate hourly data into 12-hour blocks
     agg_dict = {
         'temperature_2m': 'mean',
         'dewpoint_2m': 'mean',
@@ -144,65 +143,98 @@ def aggregate_12h(df):
         'winddirection_10m': 'first'
     }
     
-    # Adicionar agregação de ondas se as colunas existirem
+    # Add wave aggregation if the columns exist
     if 'wave_height' in df.columns:
         agg_dict['wave_height'] = 'mean'
     if 'wave_direction' in df.columns:
         agg_dict['wave_direction'] = 'first'
 
-    # Inclui nuvens por nível se houver
+    # Include per-level cloud cover if available
     for col in df.columns:
         if 'cloud_cover_' in col:
             agg_dict[col] = 'mean'
             
     return df.resample('12h').agg(agg_dict)
 
+def aggregate_6h(df):
+    # Aggregate hourly data into 6-hour blocks
+    agg_dict = {
+        'temperature_2m': 'mean',
+        'dewpoint_2m': 'mean',
+        'precipitation': 'sum',
+        'cloudcover': 'mean',
+        'windspeed_10m': 'mean',
+        'windgusts_10m': 'max',
+        'pressure_msl': 'mean',
+        'is_day': 'first',
+        'winddirection_10m': 'first'
+    }
+    if 'wave_height' in df.columns:
+        agg_dict['wave_height'] = 'mean'
+    if 'wave_direction' in df.columns:
+        agg_dict['wave_direction'] = 'first'
+    for col in df.columns:
+        if 'cloud_cover_' in col:
+            agg_dict[col] = 'mean'
+    return df.resample('6h').agg(agg_dict)
+
 def get_wind_color(speed):
-    # Cores baseadas na velocidade (km/h)
-    if speed < 15: return '#9ca3af', 0.3
-    if speed < 40: return '#22d3ee', 0.6
-    if speed < 60: return '#06b6d4', 0.8
-    if speed < 80: return '#f59e0b', 0.9
-    return '#ef4444', 1.0
+    # Colors based on speed (km/h) using a continuous gradient
+    s = max(0, min(speed, 100))
+    norm = s / 100.0
+    colors = [
+        (0.0, '#9ca3af'),
+        (0.1, '#67e8f9'),
+        (0.2, '#22d3ee'),
+        (0.3, '#facc15'),
+        (0.5, '#fb923c'),
+        (0.8, '#ef4444'),
+        (1.0, '#ef4444')
+    ]
+    cmap = LinearSegmentedColormap.from_list("wind_gust", colors)
+    rgba = cmap(norm)
+    color_hex = matplotlib.colors.to_hex(rgba)
+    alpha = 0.3 + (0.6 * norm)
+    return color_hex, alpha
 
 def draw_font_icon(ax, x_center, y_center, condition, is_day):
-    # Usar fonte do sistema com suporte a emojis/símbolos (Windows)
+    # Use a system font with emoji/symbol support (Windows)
     FONT_NAME = 'Segoe UI Emoji' 
-    FONT_SIZE = 12 # Tamanho grande para o ícone
+    FONT_SIZE = 12 # Large icon size
     
     icon_char = ''
     icon_color = ''
     
-    # Ajuste fino vertical (deslocado para baixo conforme solicitado)
+    # Fine vertical adjustment (shifted downward)
     y_pos = y_center - 0.15
 
     if condition == 'rain':
-        # Nuvem com chuva (🌧️)
+        # Cloud with rain (🌧️)
         icon_char = '\U0001F327' 
-        icon_color = '#3B82F6' # Azul
+        icon_color = '#3B82F6' # Blue
     
     elif condition == 'cloudy':
-        # Nuvem (☁)
+        # Cloud (☁)
         icon_char = '\u2601' 
-        icon_color = '#9CA3AF' # Cinza
+        icon_color = '#9CA3AF' # Gray
         
     elif condition == 'partly':
-        # Sol com nuvem (⛅)
+        # Sun with cloud (⛅)
         icon_char = '\u26C5'
-        icon_color = '#9CA3AF' # Cinza
+        icon_color = '#9CA3AF' # Gray
         if not is_day:
-            # Não existe "Lua atrás da nuvem" universal. Vamos usar nuvem simples.
+            # No universal "Moon behind cloud"; fallback to simple cloud.
             icon_char = '\u2601'
     
     else: # Clear
         if is_day:
-            # Sol (☀)
+            # Sun (☀)
             icon_char = '\u2600'
-            icon_color = '#F59E0B' # Laranja
+            icon_color = '#F59E0B' # Orange
         else:
-            # Lua (🌙)
+            # Moon (🌙)
             icon_char = '\U0001F319' # Crescent Moon
-            icon_color = '#FCD34D' # Amarelo Lua
+            icon_color = '#FCD34D' # Yellow
 
     try:
         ax.text(x_center, y_pos, icon_char, fontname=FONT_NAME, fontsize=FONT_SIZE, 
@@ -210,7 +242,7 @@ def draw_font_icon(ax, x_center, y_center, condition, is_day):
     except Exception:
         ax.text(x_center, y_pos, "?", fontsize=20, ha='center', va='center')
 
-    # Retornar rótulos de texto
+    # Return text labels
     if condition == 'rain':
         return "Chuva", '#2563EB'
     elif condition == 'cloudy':
@@ -230,8 +262,8 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     C_MUTED = '#6b7280'
     C_TEMP = '#ef4444'
     C_DEW = '#3b82f6'
-    C_RAIN = '#1e3a8a' # Azul mais escuro (blue-900)
-    C_WAVE = '#0891b2' # Ciano escuro
+    C_RAIN = '#1e3a8a' 
+    C_WAVE = '#0891b2' 
     
     interior_hide = (not is_litoral) and city_name in ("Pouso Alegre, MG", "Carapicuíba, SP", "São Carlos, SP")
     
@@ -251,13 +283,15 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         ax_wave = fig.add_subplot(gs[3], sharex=ax_table, facecolor=C_BG)
     
     times = df_agg.index
+    step_hours = int(round((times[1]-times[0]).total_seconds()/3600)) if len(times)>1 else 12
+    half_step = step_hours/2
     
-    # --- 1. TABELA DE DADOS ---
-    ax_table.set_xlim(times[0], times[-1] + pd.Timedelta(hours=12))
+    # --- 1. DATA TABLE ---
+    ax_table.set_xlim(times[0], times[-1] + pd.Timedelta(hours=step_hours))
     ax_table.set_ylim(0, 4.5)
     ax_table.axis('off')
     
-    # Rótulos Laterais
+    # Side labels
     labels = [
         (0.6, "VENTO"), (1.5, "PRESSÃO"), 
         (2.5, "CONDIÇÃO"), (3.5, "DATA")
@@ -271,21 +305,25 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         if i > 0:
             ax_table.axvline(t, color=C_GRID, linestyle='--', linewidth=1)
             
-        x_center = t + pd.Timedelta(hours=6)
+        x_center = t + pd.Timedelta(hours=half_step)
         
-        # LINHA 3: Hora e Dia
+        # ROW 3: Hour and Day
         hour_txt = t.strftime('%H')
         ax_table.text(x_center, 3.4, hour_txt + "h", ha='center', va='center', fontsize=8, fontweight='bold', color=C_MUTED)
         
         if i == 0 or t.day != times[i-1].day:
             day_txt = t.strftime('%a %d').upper()
-            has_next_block = (i + 1 < len(times)) and (times[i+1].day == t.day)
-            day_x = t + pd.Timedelta(hours=12) if has_next_block else t + pd.Timedelta(hours=6)
-            ax_table.text(day_x, 3.9, day_txt, ha='center', va='center', fontsize=9, color=C_TEXT, fontweight='bold')
+            current_day = t.day
+            day_blocks = [time for time in times if time.day == current_day]
+            if day_blocks:
+                start_t = day_blocks[0]
+                end_t = day_blocks[-1] + pd.Timedelta(hours=step_hours)
+                day_x = start_t + (end_t - start_t) / 2
+                ax_table.text(day_x, 3.9, day_txt, ha='center', va='center', fontsize=9, color=C_TEXT, fontweight='bold')
             if i > 0:
                 ax_table.axvline(t, color='#d1d5db', linestyle='-', linewidth=1.5)
 
-        # LINHA 2: Ícone do Tempo
+        # ROW 2: Weather icon
         is_day = df_agg['is_day'].iloc[i]
         precip = df_agg['precipitation'].iloc[i]
         cloud = df_agg['cloudcover'].iloc[i]
@@ -298,12 +336,12 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         label_txt, label_color = draw_font_icon(ax_table, x_center, 2.95, cond_type, is_day)
         ax_table.text(x_center, 2.25, label_txt, ha='center', va='center', fontsize=7, color=label_color, fontweight='bold')
 
-        # LINHA 1: Pressão
+        # ROW 1: Pressure
         press = df_agg['pressure_msl'].iloc[i]
         ax_table.text(x_center, 1.55, f"{press:.0f}", ha='center', va='center', fontsize=9, color='#8b5cf6', fontweight='bold')
         ax_table.text(x_center, 1.15, "hPa", ha='center', va='center', fontsize=7, color='#8b5cf6')
         
-        # LINHA 0: Vento
+        # ROW 0: Wind
         w_spd = df_agg['windspeed_10m'].iloc[i]
         w_dir = df_agg['winddirection_10m'].iloc[i]
         w_gust = df_agg['windgusts_10m'].iloc[i]
@@ -314,18 +352,27 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         t_trans = matplotlib.transforms.Affine2D().rotate_deg(270 - w_dir)
         m = mmarkers.MarkerStyle(marker=arrow_path, transform=t_trans)
         
-        ax_table.scatter(x_center - pd.Timedelta(hours=3.5), 0.6, marker=m, s=120, color=C_MUTED)
-        ax_table.text(x_center + pd.Timedelta(hours=1.0), 0.6, f"{w_spd:.0f}", ha='right', va='center', fontsize=11, fontweight='bold', color=C_TEXT)
-        ax_table.text(x_center + pd.Timedelta(hours=1.2), 0.6, "km/h", ha='left', va='center', fontsize=7, color=C_MUTED)
+        if step_hours <= 6:
+            ax_table.scatter(x_center - pd.Timedelta(hours=1.5), 0.6, marker=m, s=100, color=C_MUTED)
+            ax_table.text(x_center + pd.Timedelta(hours=0.5), 0.6, f"{w_spd:.0f}", ha='left', va='center', fontsize=10, fontweight='bold', color=C_TEXT)
+        else:
+            ax_table.scatter(x_center - pd.Timedelta(hours=3.5), 0.6, marker=m, s=120, color=C_MUTED)
+            ax_table.text(x_center + pd.Timedelta(hours=1.0), 0.6, f"{w_spd:.0f}", ha='right', va='center', fontsize=11, fontweight='bold', color=C_TEXT)
+            ax_table.text(x_center + pd.Timedelta(hours=1.2), 0.6, "km/h", ha='left', va='center', fontsize=7, color=C_MUTED)
         
-        # Rajada
+        # Gust
         c_gust, alpha_gust = get_wind_color(w_gust)
-        rect_w = 0.40 
+        if step_hours <= 6:
+            rect_w = 0.20
+            txt_size = 8
+        else:
+            rect_w = 0.40
+            txt_size = 9
         rect_x = mdates.date2num(x_center) - (rect_w / 2)
         ax_table.add_patch(Rectangle((rect_x, 0.1), rect_w, 0.25, color=c_gust, alpha=alpha_gust))
-        ax_table.text(x_center, 0.22, f"{w_gust:.0f}", ha='center', va='center', fontsize=9, color=c_gust, fontweight='bold')
+        ax_table.text(x_center, 0.22, f"{w_gust:.0f}", ha='center', va='center', fontsize=txt_size, color=c_gust, fontweight='bold')
 
-    # --- 2. GRÁFICO TEMPERATURA ---
+    # --- 2. TEMPERATURE PLOT ---
     ax_temp.grid(True, linestyle='-', color=C_GRID, alpha=0.8)
     ax_temp.spines['top'].set_visible(False)
     ax_temp.spines['right'].set_visible(False)
@@ -336,7 +383,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     ax_temp.plot(df_hourly.index, df_hourly['temperature_2m'], color=C_TEMP, linewidth=2.5, label='Temp')
     ax_temp.plot(df_hourly.index, df_hourly['dewpoint_2m'], color=C_DEW, linewidth=1.5, linestyle='--', label='Orvalho')
     
-    # Extremos diários
+    # Daily extremes
     for _, group in df_hourly.groupby(df_hourly.index.date):
         t_max = group['temperature_2m'].max()
         idx_max = group['temperature_2m'].idxmax()
@@ -349,7 +396,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     ax_temp.set_ylabel('Temperatura (°C)', color=C_TEMP, fontweight='bold')
     ax_temp.tick_params(axis='y', colors=C_TEMP)
 
-    # Eixo Orvalho
+    # Dewpoint axis
     ax_dew = ax_temp.twinx()
     t_min = min(df_hourly['temperature_2m'].min(), df_hourly['dewpoint_2m'].min())
     t_max = max(df_hourly['temperature_2m'].max(), df_hourly['dewpoint_2m'].max())
@@ -367,9 +414,9 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     
     for i, t in enumerate(times):
         if df_agg['is_day'].iloc[i] == 0:
-            ax_temp.axvspan(t, t + pd.Timedelta(hours=12), color='#111827', alpha=0.05)
+            ax_temp.axvspan(t, t + pd.Timedelta(hours=step_hours), color='#111827', alpha=0.05)
 
-    # --- 3. GRÁFICO CHUVA E NUVENS ---
+    # --- 3. RAIN AND CLOUDS PLOT ---
     ax_precip.grid(False)
     ax_precip.spines['top'].set_visible(False)
     ax_precip.spines['right'].set_visible(False)
@@ -397,11 +444,11 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     
     ax_precip.pcolormesh(T_grid, A_grid, Z, shading='gouraud', cmap=cmap, vmin=0, vmax=100, alpha=0.9)
     
-    # Eixos (Ordem Corrigida)
-    # Criar eixo secundário (Chuva) PRIMEIRO
+    # Axes (corrected order)
+    # Create the secondary axis (Rain) FIRST
     ax_rain = ax_precip.twinx()
     
-    # Configurar Eixo Nuvens (Principal) -> DIREITA
+    # Configure Clouds axis (Primary) -> RIGHT
     ax_precip.set_ylim(0, 16)
     ax_precip.set_ylabel('Altitude Nuvens (km)', color=C_MUTED)
     ax_precip.yaxis.set_label_position("right")
@@ -409,7 +456,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     ax_precip.spines['left'].set_visible(False)
     ax_precip.spines['right'].set_visible(True)
     
-    # Configurar Eixo Chuva (Secundário) -> ESQUERDA
+    # Configure Rain axis (Secondary) -> LEFT
     ax_rain.set_ylabel('Chuva (mm)', color=C_RAIN, fontweight='bold')
     ax_rain.yaxis.set_label_position("left")
     ax_rain.yaxis.tick_left()
@@ -418,17 +465,18 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     ax_rain.spines['left'].set_color(C_RAIN)
     ax_rain.tick_params(axis='y', colors=C_RAIN)
     
-    # Barras de chuva
-    bar_width = 0.45 
-    ax_rain.bar(mdates.date2num(times) + 0.25, df_agg['precipitation'], width=bar_width, color=C_RAIN, alpha=0.3, label='Chuva')
+    # Rain bars
+    bar_offset = (half_step/24.0)
+    bar_width = (step_hours*0.9)/24.0
+    ax_rain.bar(mdates.date2num(times) + bar_offset, df_agg['precipitation'], width=bar_width, color=C_RAIN, alpha=0.3, label='Chuva')
     
     for t, val in zip(times, df_agg['precipitation']):
         if val > 0.1:
-            ax_rain.text(t + pd.Timedelta(hours=6), val + 0.2, f"{val:.1f}mm", ha='center', va='bottom', fontsize=9, color=C_RAIN, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
+            ax_rain.text(t + pd.Timedelta(hours=half_step), val + 0.2, f"{val:.1f}mm", ha='center', va='bottom', fontsize=9, color=C_RAIN, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
             
     ax_rain.set_ylim(0, max(15, df_agg['precipitation'].max() * 1.5))
     
-    # --- 4. GRÁFICO DE ONDAS / HIDROLÓGICO ---
+    # --- 4. WAVES / HYDROLOGICAL PLOT ---
     if ax_wave is not None and is_litoral and 'wave_height' in df_hourly.columns:
         ax_wave.grid(True, linestyle='-', color=C_GRID, alpha=0.8)
         ax_wave.spines['top'].set_visible(False)
@@ -448,140 +496,48 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
             t_end = df_hourly.index.max()
             tide_slice = tide_df.loc[(tide_df.index >= t_start) & (tide_df.index <= t_end)]
             if not tide_slice.empty:
-                # Suavização da maré (Interpolação Cúbica)
+                # Tide smoothing (cubic interpolation)
                 try:
-                    # Criar grade regular de 10 min
+                    # Create a regular 10‑min grid
                     t_new = pd.date_range(start=tide_slice.index.min(), end=tide_slice.index.max(), freq='10min')
-                    # Unir índices originais com a grade para garantir que os picos exatos sejam considerados
+                    # Merge original indices with the grid to ensure exact peaks are preserved
                     t_combined = tide_slice.index.union(t_new).sort_values()
-                    # Reindex e interpolar
+                    # Reindex and interpolate
                     tide_smooth = tide_slice.reindex(t_combined).interpolate(method='cubic')
                 except Exception:
-                    # Fallback se scipy não estiver disponível ou erro na interpolação
+                    # Fallback if scipy is unavailable or interpolation fails
                     tide_smooth = tide_slice
 
                 ax_tide = ax_wave.twinx()
-                # Plot curva suave preta (sem scatter)
+                # Plot smooth black curve (no scatter)
                 ax_tide.plot(tide_smooth.index, tide_smooth['altura'], color='black', linewidth=1.5, alpha=0.8, zorder=5)
                 
                 ax_tide.set_ylabel('Maré (m)', color='black', fontweight='bold')
                 ax_tide.tick_params(axis='y', colors='black')
                 
-                # Escala solicitada: -1.5 até o máximo
+                # Requested scale: -1.5 up to the maximum
                 tide_max = tide_smooth['altura'].max()
-                # Adicionamos uma pequena margem superior (0.1) para o pico não tocar na borda
+                # Add a small top margin (0.1) so the peak does not touch the edge
                 ax_tide.set_ylim(-1.5, tide_max + 0.1)
 
                 ax_tide.spines['top'].set_visible(False)
                 ax_tide.spines['left'].set_visible(False)
                 ax_tide.spines['bottom'].set_visible(False)
         
-        # Setas de Direção (em intervalos regulares para não poluir, ex: a cada 3 horas)
-        # Reamostrar para 3h para as setas
+        # Direction arrows (sampled every 3 hours to avoid clutter)
         wave_sub = df_hourly.resample('3h').first()
         
         for t, row in wave_sub.iterrows():
             if pd.notnull(row['wave_height']) and pd.notnull(row['wave_direction']):
-                # Lógica: Seta aponta para onde a onda vai.
-                # Direção 0 = Norte. Seta ^ rotacionada 0.
-                # Direção 180 = Sul. Seta ^ rotacionada 180 (aponta baixo).
-                # Matplotlib rotate_deg gira anti-horário.
-                # Se dir=90 (Leste). Seta deve apontar Direita (>).
-                # Seta ^ (0). Rot 90 (CCW) -> Aponta Esquerda (<). Errado.
-                # Então rotação deve ser -dir?
-                # Se dir=90 (Leste). Queremos apontar Leste (>).
-                # Seta ^ (0). -90 -> Aponta Direita (>). Certo.
-                # Mas a convenção meteorológica: 0=Norte (Vento de Norte para Sul? Ou indo para Norte?)
-                # Vento/Onda: "Vem de".
-                # Se onda vem de Sul (180). Ela vai para Norte (0).
-                # Queremos seta apontando Norte (^).
-                # Se dir=180.
-                # Se usarmos marker ^ (aponta 0).
-                # Rotação deve ser 0.
-                # Se dir=180. Como chegar em 0?
-                # Se usarmos rot = 180 - dir? 180 - 180 = 0.
-                # Se dir=90 (Leste, vem de Leste, vai para Oeste).
-                # Queremos seta apontando Oeste (<).
-                # ^ (0). Rot 90 CCW = <.
-                # Se rot = 180 - 90 = 90. Certo.
-                # Se dir=270 (Oeste, vem de Oeste, vai para Leste).
-                # Queremos seta apontando Leste (>).
-                # ^ (0). Rot 270 CCW = >.
-                # Se rot = 180 - 270 = -90 (ou 270). Certo.
-                # Conclusão: Rotação = 180 - direction.
-                
-                # Mas espere, no HTML eu usei `(dir + 180)`.
-                # HTML transform: rotate(deg).
-                # Seta SVG original apontava para Cima? "M12 2..." Sim, path aponta para cima.
-                # HTML rotate é CW (horário) em CSS/SVG? Normalmente sim.
-                # Se dir=180 (Sul). +180 = 360 = 0. Seta aponta Cima (Norte).
-                # Se dir=90 (Leste). +180 = 270.
-                # Seta Cima. Rot 270 CW -> Aponta Esquerda (Oeste).
-                # Confere: Vem de Leste, vai para Oeste.
-                
-                # Matplotlib rotate_deg é CCW (anti-horário).
-                # Queremos o mesmo resultado.
-                # Dir 180 -> Aponta Cima (0).
-                # Dir 90 -> Aponta Esquerda (90 CCW).
-                # Dir 270 -> Aponta Direita (270 CCW ou -90).
-                # Então Rotação Matplotlib = Direção.
-                # Teste:
-                # Dir 180. Rot 180 CCW. ^ vira v (Baixo). Errado. Queremos Cima.
-                # Ah, Onda 180 vem do Sul. Vai para Norte.
-                # Se eu quero seta apontando Norte (^).
-                # Se eu giro 180, ela aponta Sul.
-                
-                # Vamos simplificar:
-                # O dado é "Direção de onde vem".
-                # Queremos seta "Para onde vai".
-                # Para onde vai = De onde vem + 180.
-                # Ex: Vem de Sul (180). Vai para Norte (360/0).
-                # Ex: Vem de Leste (90). Vai para Oeste (270).
-                
-                # Matplotlib Marker `^` aponta para Cima (Norte, 0 ou 360).
-                # Rotação Matplotlib é CCW.
-                # Se eu quero apontar Oeste (270 ou -90).
-                # ^ rotacionado 90 CCW aponta Esquerda (Oeste).
-                # Então se Destino é 270. Eu preciso de +90 CCW.
-                # Relação: Rot = Destino - 90? Não.
-                # Vamos usar (0, 1) vector.
-                # Ângulo matemático padrão: 0 = Direita (Leste). 90 = Cima (Norte).
-                # Matplotlib marker orientation depende do marker. `^` aponta Y+ (90 math).
-                # Se eu quero apontar Oeste (180 math).
-                # Preciso girar 90 deg CCW.
-                # Destino: Oeste (270 geo).
-                # Conversão Geo -> Math:
-                # Math = 90 - Geo.
-                # Geo 0 (N) -> Math 90.
-                # Geo 90 (E) -> Math 0.
-                # Geo 270 (W) -> Math 180.
-                
-                # Marker `^` está em Math 90.
-                # Quero colocar em Math 180.
-                # Rotação necessária: +90.
-                
-                # Fórmula Geral:
-                # Destino_Geo = (Origem_Geo + 180) % 360.
-                # Destino_Math = 90 - Destino_Geo.
-                # Rotação = Destino_Math - 90 (posição inicial do marker).
-                # Rotação = (90 - Destino_Geo) - 90 = -Destino_Geo.
-                # Rotação = - (Origem_Geo + 180).
-                
-                # Teste:
-                # Vem de Sul (180). Destino Norte (0).
-                # Rot = -(180+180) = -360 = 0.
-                # Marker ^ fica em pé. Correto.
-                
-                # Vem de Leste (90). Destino Oeste (270).
-                # Rot = -(90+180) = -270 = +90.
-                # Marker ^ gira 90 CCW -> Aponta Esquerda. Correto.
-                
-                # Então a fórmula é: angle = - (dir + 180).
+                # Direction logic: input is the "coming-from" direction (geo degrees).
+                # We want the "going-to" direction = dir + 180.
+                # Matplotlib rotates CCW and '^' points up (North), therefore:
+                # angle = - (dir + 180)
                 
                 w_dir = row['wave_direction']
                 marker_angle = - (w_dir + 180)
                 
-                # Seta estilizada para onda (mais fina que a do vento)
+                # Styled arrow for waves (thinner than wind arrow)
                 wave_arrow_path = mpath.Path([
                     (0, 1.0), (-0.5, -0.7), (0, -0.2), (0.5, -0.7), (0, 1.0)
                 ])
@@ -589,7 +545,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
                 t_trans = matplotlib.transforms.Affine2D().rotate_deg(marker_angle)
                 m = mmarkers.MarkerStyle(marker=wave_arrow_path, transform=t_trans)
                 
-                ax_wave.scatter(t, row['wave_height'], marker=m, s=100, color='#0e7490', zorder=10) # Aumentei um pouco o tamanho (s=100)
+                ax_wave.scatter(t, row['wave_height'], marker=m, s=100, color='#0e7490', zorder=10) 
         
     elif ax_wave is not None and is_litoral:
         msg = "Dados de Onda não disponíveis"
@@ -610,7 +566,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         ax_wave.tick_params(axis='y', colors=C_MUTED)
         ax_wave.text(0.5, 0.5, "Modelo hidrológico (a integrar)", ha='center', va='center', transform=ax_wave.transAxes, color=C_MUTED)
 
-    ax_precip.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+    ax_precip.xaxis.set_major_locator(mdates.HourLocator(interval=step_hours))
     plt.setp(ax_table.get_xticklabels(), visible=False)
     plt.setp(ax_temp.get_xticklabels(), visible=False)
     plt.setp(ax_precip.get_xticklabels(), visible=False)
@@ -620,7 +576,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     source_label = "GFS/GFS-WAVE/Marinha" if is_litoral else "GFS"
     fig.text(0.5, 0.02, f"Gerado por Geopixel • Fonte: {source_label} • {city_name}", ha='center', fontsize=10, color=C_MUTED)
     
-    logo_path = Path(__file__).parent / "geo_logo1.png"
+    logo_path = Path(__file__).parent / "geo_monitor-transparente.png"
     if logo_path.exists():
         try:
             img = plt.imread(str(logo_path))
@@ -638,88 +594,79 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     fig.text(0.5, 0.95, f"Meteograma — {city_name}", ha='center', va='center', fontsize=18, fontweight='bold', color=C_TEXT)
 
     plt.savefig(output_path, facecolor=C_BG)
-    print(f"Sucesso! Arquivo salvo em: {output_path}")
-    plt.close(fig) # Importante liberar memória no loop
+    plt.close(fig) 
 
 def main():
-    # Configuração das Cidades
+    # Cities configuration
     cities = [
-        {"name": "Ubatuba, SP", "file_name": "ubatuba", "lat": -23.43, "lon": -45.07, "litoral": True},
-        {"name": "Caraguatatuba, SP", "file_name": "caraguatatuba", "lat": -23.62, "lon": -45.41, "litoral": True},
-        {"name": "São Sebastião, SP", "file_name": "sao_sebastiao", "lat": -23.76, "lon": -45.41, "litoral": True},
-        {"name": "Pouso Alegre, MG", "file_name": "pouso_alegre", "lat": -22.23, "lon": -45.93, "litoral": False},
-        {"name": "Carapicuíba, SP", "file_name": "carapicuiba", "lat": -23.52, "lon": -46.84, "litoral": False},
-        {"name": "São Carlos, SP", "file_name": "sao_carlos", "lat": -22.00, "lon": -47.89, "litoral": False},
+        {"name": "Ubatuba, SP", "file_name": "ubatuba", "lat": -23.43, "lon": -45.07, "litoral": True, "days": 7},
+        {"name": "Caraguatatuba, SP", "file_name": "caraguatatuba", "lat": -23.62, "lon": -45.41, "litoral": True, "days": 7},
+        {"name": "São Sebastião, SP", "file_name": "sao_sebastiao", "lat": -23.76, "lon": -45.41, "litoral": True, "days": 7},
+        {"name": "Pouso Alegre, MG", "file_name": "pouso_alegre", "lat": -22.23, "lon": -45.93, "litoral": False, "days": 3},
+        {"name": "Carapicuíba, SP", "file_name": "carapicuiba", "lat": -23.52, "lon": -46.84, "litoral": False, "days": 7},
+        {"name": "São Carlos, SP", "file_name": "sao_carlos", "lat": -22.00, "lon": -47.89, "litoral": False, "days": 7},
     ]
-
+ 
     root = Path(__file__).parent
     data_dir = root / "data"
-    data_dir.mkdir(parents=True, exist_ok=True) # Garantir diretório
+    data_dir.mkdir(parents=True, exist_ok=True) 
 
     for city in cities:
-        print(f"\n==================================================")
-        print(f"Processando: {city['name']}")
-        print(f"==================================================")
-        
         lat = city["lat"]
         lon = city["lon"]
         file_name = city["file_name"]
         is_litoral = city["litoral"]
+        days = city["days"]
         
         raw_path = data_dir / f"gfs_{file_name}_raw.json"
         csv_path = data_dir / f"gfs_{file_name}_hourly.csv"
-        output_path = root / f"meteograma_{file_name}.png"
-
-        # 1. Download de Dados
-        print("--- Etapa 1: Download de Dados GFS e Marine ---")
+        
+        # Create output directory once
+        saidas_dir = root / "saidas_meteogramas"
+        saidas_dir.mkdir(exist_ok=True)
+        
         df = None
+        output_path = None
+        
         try:
-            # GFS
-            d = fetch_gfs(lat, lon, days=7)
-            df = to_dataframe(d)
+            d = fetch_gfs(lat, lon, days=days)
             
-            # Marine (apenas se for litoral)
-            if is_litoral:
-                try:
-                    d_marine = fetch_marine(lat, lon, days=7)
-                    df_marine = to_dataframe(d_marine)
-                    # Merge (join alinha pelo índice 'time')
-                    df = df.join(df_marine, rsuffix="_marine")
-                    print("Dados marinhos mesclados com sucesso.")
-                except Exception as em:
-                    print(f"Erro no download marinho: {em}")
-            else:
-                print("Cidade do interior: pulando dados marinhos.")
+            # Determine run time and create output path
+            try:
+                if 'current' in d and 'time' in d['current']:
+                    run_time = pd.to_datetime(d['current']['time'])
+                elif 'hourly' in d and 'time' in d['hourly'] and len(d['hourly']['time']) > 0:
+                    run_time = pd.to_datetime(d['hourly']['time'][0])
+                else:
+                    run_time = pd.Timestamp.now()
+                
+                run_day = run_time.strftime('%d%m%Y')
+                output_path = saidas_dir / f"meteograma_{file_name}_{run_day}.png"
+            except Exception:
+                output_path = saidas_dir / f"meteograma_{file_name}.png"
 
-            # Salvar backup
+            df = to_dataframe(d)
+
+            if is_litoral:
+                d_marine = fetch_marine(lat, lon, days=days)
+                df_marine = to_dataframe(d_marine)
+                df = df.join(df_marine, rsuffix="_marine")
+
             save_json(d, raw_path)
             save_csv(df, csv_path)
-            print("Dados baixados e salvos com sucesso.")
-            
-        except Exception as e:
-            print(f"Erro no download: {e}")
-            # Tentar usar dados locais se download falhar
+
+        except Exception:
+            output_path = saidas_dir / f"meteograma_{file_name}.png"
             if csv_path.exists():
-                print("Tentando usar dados locais em cache...")
                 df = pd.read_csv(csv_path)
                 df['time'] = pd.to_datetime(df['time'])
                 df = df.set_index('time')
             else:
-                print("Não foi possível obter dados. Pulando esta cidade.")
                 continue
 
-        # 2. Processamento e Geração do Gráfico
-        print("\n--- Etapa 2: Geração do Meteograma ---")
-        try:
-            if df is not None and not df.empty:
-                df_12h = aggregate_12h(df)
-                draw_meteogram(df_12h, df, output_path, city["name"], lat, lon, is_litoral)
-            else:
-                print("DataFrame vazio ou inválido.")
-        except Exception as e:
-            print(f"Erro na geração do gráfico: {e}")
-            import traceback
-            traceback.print_exc()
+        if df is not None and not df.empty:
+            df_agg = aggregate_6h(df) if days <= 3 else aggregate_12h(df)
+            draw_meteogram(df_agg, df, output_path, city["name"], lat, lon, is_litoral)
 
 if __name__ == "__main__":
     main()
