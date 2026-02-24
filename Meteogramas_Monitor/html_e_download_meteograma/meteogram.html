@@ -404,7 +404,7 @@ function buildCharts(d, d0){
   const mon = String(tStart.getUTCMonth()+1).padStart(2,'0');
   const hr = String(tStart.getUTCHours()).padStart(2,'0');
   const mn = String(tStart.getUTCMinutes()).padStart(2,'0');
-  const runStr = `${day}.${mon} ${hr}:${mn} UTC`;
+  const runStr = `${day}/${mon} ${hr}:${mn} UTC`;
   document.getElementById('header-info').innerHTML = 
     `Lat: ${locationCfg.latLabel} &nbsp; Lon: ${locationCfg.lonLabel}<br>` +
     `<span style="color:var(--muted)">Rodada: ${runStr}</span>`;

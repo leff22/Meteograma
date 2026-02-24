@@ -3,13 +3,13 @@
   
 <head>
 <meta charset="utf-8" />
-<title>Meteograma Híbrido — Caraguatatuba, SP</title>
+<title>Meteograma</title>
 
 <style>
   :root{ --bg:#f7f7f7; --fg:#111827; --grid:#e5e7eb; --muted:#6b7280; --temp:#ef4444; --dew:#3b82f6; --wind:#22d3ee; --gust:#06b6d4; --press:#8b5cf6; --rain:#3b82f6; --colw:60px; --table-pad:40px; --chart-pad:5px }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Arial; display:flex; flex-direction:column; min-height:100vh; overflow-y:auto}
-  .wrap{display:flex; flex:1; overflow:visible; width:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Arial; display:flex; flex-direction:column; height:100vh; overflow:hidden}
+  .wrap{display:flex; flex:1; overflow:hidden; width:100%; min-height:0}
   .footer{padding:8px 12px; border-top:1px solid var(--grid); display:flex; justify-content:flex-end; background:var(--bg)}
   .labels{width:160px; background:var(--bg); border-right:1px solid var(--grid); position:relative; z-index:3; overflow-y:hidden}
   .labels .row{height:32px; display:flex; align-items:center; justify-content:flex-end; font-size:12px; color:var(--muted); font-weight:500; letter-spacing:0.02em; line-height:1; padding:0 8px; border-bottom:1px dashed var(--grid)}
@@ -41,7 +41,8 @@
   #tr-wind td{height:80px}
   thead th{height:32px; color:var(--muted); border-bottom:1px solid var(--grid)}
   .spacer{min-width:var(--table-pad); background:transparent; border-right:1px solid var(--grid)}
-  .daysep{border-left:2px solid rgba(255,255,255,0.18)}
+  /* Updated day separator style - thicker and darker */
+  .daysep{border-left:2px solid #d1d5db} 
   .cell-night{background:rgba(0,0,0,0.06)}
   .sky{font-size:16px}
   .press{color:var(--press); font-weight:600}
@@ -53,12 +54,11 @@
   .gust-row{width:100%; padding:2px 0; border-radius:6px}
   .gust{color:#0e7490; font-weight:700; padding:1px 4px; border-radius:4px; background:transparent}
   .chart{width:max-content; background:var(--bg)}
-  .panel{height:180px; border-bottom:1px solid var(--grid)}
+  .panel{height:200px; border-bottom:1px solid var(--grid)}
   .panel.wind{height:220px}
-  .panel.temp{height:200px}
-  .panel.pc{height:200px; position:relative}
-  .panel.wave{height:140px}
-  .panel.tide{height:140px}
+  .panel.temp{height:260px}
+  .panel.pc{height:260px; position:relative}
+  .panel.wave{height:260px}
   .legend-overlay{position:absolute; bottom:5px; left:var(--chart-pad); display:flex; gap:12px; padding:4px 8px; background:rgba(255,255,255,0.7); border-radius:4px; align-items:center; z-index:100; pointer-events:none}
   .legend-item{display:flex; align-items:center; gap:4px; font-size:10px; color:var(--muted); font-weight:600}
   .legend-item .box{width:12px; height:10px; border-radius:1px}
@@ -150,60 +150,45 @@
 </div>
 
 <script>
-const LOCATIONS = {
-  pousoalegre: {
-    name: "Pouso Alegre, MG",
-    latLabel: "-22.23°S",
-    lonLabel: "-45.94°W",
-    csv: "./data/gfs_pousoalegre_hourly.csv",
-    png: "meteograma_pouso_alegre_A4.png"
-  },
-  caraguatatuba: {
-    name: "Caraguatatuba, SP",
-    latLabel: "-23.62°S",
-    lonLabel: "-45.41°W",
-    csv: "./data/gfs_caraguatatuba_hourly.csv",
-    png: "meteograma_caraguatatuba_A4.png"
-  },
-  carapicuiba: {
-    name: "Carapicuíba, SP",
-    latLabel: "-23.52°S",
-    lonLabel: "-46.84°W",
-    csv: "./data/gfs_carapicuiba_hourly.csv",
-    png: "meteograma_carapicuiba_A4.png"
-  },
-  saocarlos: {
-    name: "São Carlos, SP",
-    latLabel: "-22.00°S",
-    lonLabel: "-47.89°W",
-    csv: "./data/gfs_sao_carlos_hourly.csv",
-    png: "meteograma_sao_carlos_A4.png"
-  },
-  ubatuba: {
-    name: "Ubatuba, SP",
-    latLabel: "-23.43°S",
-    lonLabel: "-45.07°W",
-    csv: "./data/gfs_ubatuba_hourly.csv",
-    png: "meteograma_ubatuba_A4.png"
-  },
-  saosebastiao: {
-    name: "São Sebastião, SP",
-    latLabel: "-23.80°S",
-    lonLabel: "-45.40°W",
-    csv: "./data/gfs_sao_sebastiao_hourly.csv",
-    png: "meteograma_sao_sebastiao_A4.png"
-  }
+const urlParams = new URLSearchParams(window.location.search);
+
+// Determine CSV source
+let csvSource = urlParams.get('csv');
+if (!csvSource) {
+    const lat = urlParams.get('lat');
+    const lon = urlParams.get('lon');
+    if (lat && lon) {
+        // Use local API if lat/lon provided but no CSV
+        csvSource = `http://localhost:5000/meteogram?lat=${lat}&lon=${lon}&format=csv`;
+    } else {
+        // Fallback default: use a placeholder or require args
+        csvSource = "";
+    }
+}
+
+const locationCfg = {
+  name: urlParams.get('name'),
+  latLabel: (urlParams.get('lat') || "-") + "°",
+  lonLabel: (urlParams.get('lon') || "-") + "°",
+  csv: csvSource,
+  png: urlParams.get('png') || "meteograma.png"
 };
-const params = new URLSearchParams(window.location.search);
-const cityKey = params.get("city") || "pousoalegre";
-const locationCfg = LOCATIONS[cityKey] || LOCATIONS["pousoalegre"];
 const titleEl = document.getElementById("title-main");
-if (titleEl) titleEl.textContent = "Meteograma — " + locationCfg.name;
-document.title = "Meteograma Híbrido — " + locationCfg.name;
+if (titleEl) {
+    titleEl.textContent = locationCfg.name ? "Meteograma — " + locationCfg.name : "Meteograma";
+}
+document.title = locationCfg.name ? "Meteograma Híbrido — " + locationCfg.name : "Meteograma Híbrido";
 
 function parseCSV(txt){
-  // ## Analisa o CSV e extrai colunas para arrays
-  const lines=txt.trim().split(/\r?\n/); const header=lines[0].split(",");
+  if(!txt || txt.startsWith("<!DOCTYPE") || txt.startsWith("{")) {
+     console.error("Invalid CSV data");
+     return null;
+  }
+  // Parse CSV and extract columns to arrays
+  const lines=txt.trim().split(/\r?\n/); 
+  if(lines.length < 2) return null;
+
+  const header=lines[0].split(",");
   const rows=lines.slice(1).map(l=>l.split(","));
   const idx=(name)=>header.indexOf(name);
   const num=(v)=>{const n=parseFloat(v); return isNaN(n)?null:n};
@@ -227,14 +212,14 @@ function parseCSV(txt){
   }
 }
 function skyIcon(isDay, cloud, precip){
-  // ## Seleciona ícone do tempo (sol, nuvem, chuva)
+  // Select weather icon (sun, cloud, rain)
   if((precip||0)>=0.2) return isDay? "🌧️":"🌧️";
   if((cloud||0)>=75) return isDay? "☁️":"☁️";
   if((cloud||0)>=40) return isDay? "🌤️":"☁️";
   return isDay? "☀️":"🌙";
 }
 function toLocalDate(s){
-  // ## Converte string ISO para Date
+  // Convert ISO string to Date
   const t = s.includes('T') ? s.replace('T',' ') : s;
   const [date, time] = t.split(' ');
   const [y,m,d] = date.split('-').map(Number);
@@ -242,7 +227,7 @@ function toLocalDate(s){
   return new Date(y, (m||1)-1, d||1, hh||0, mm||0, ss||0);
 }
 function dayName(iso){
-  // ## Formata nome do dia (ex: Segunda 10)
+  // Format day name (e.g., Mon 10)
   const d=toLocalDate(iso);
   const wd=d.toLocaleDateString('pt-BR',{weekday:'long'});
   const day=d.getDate();
@@ -253,7 +238,7 @@ function fmt(n,unit){ if(n==null) return "-"; return `${Math.round(n*10)/10}${un
 function niceCeil(n){ if(n==null||!isFinite(n)) return 10; const e=Math.floor(Math.log10(Math.max(1e-6,n))); const b=Math.pow(10,e); const s=n/b; let k; if(s<=1) k=1; else if(s<=2) k=2; else if(s<=5) k=5; else k=10; return k*b; }
 
 function windBg(kmh){
-  // ## Cor de fundo baseada na velocidade do vento
+  // Background color based on wind speed
   const s = kmh || 0;
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
   if (s <= 15) return 'linear-gradient(90deg, rgba(156,163,175,0.10) 0%, rgba(156,163,175,0.16) 100%)';
@@ -273,13 +258,13 @@ function windBg(kmh){
   return `linear-gradient(90deg, rgba(156,163,175,0.10) 0%, hsla(${hue},80%,50%,${clamp(alpha,0.2,0.98)}) 100%)`;
 }
 function dirText(deg){
-  // ## Converte graus para direção textual
+  // Convert degrees to textual direction
   const dirs=["N","NNE","NE","LNE","L","LSE","SE","SSE","S","SSO","SO","OSO","O","ONO","NO","NNO"];
   const i=Math.round((deg%360)/22.5)%16;
   return dirs[i];
 }
 function groupDays(time){
-  // ## Agrupa dados por dia
+  // Group data by day
   const groups=[]; let current=null;
   for(let i=0;i<time.length;i++){
     const d=toLocalDate(time[i]); const key=d.toDateString();
@@ -289,7 +274,7 @@ function groupDays(time){
   return groups.map(g=>({ key:g.key, start:g.start, end:g.end, span:g.end-g.start+1, label:dayName(time[g.start]) }));
 }
 function nightAreas(time,is_day){
-  // ## Calcula áreas noturnas para o gráfico
+  // Calculate night areas for the chart
   const arr=[]; let s=null;
   for(let i=0;i<time.length;i++){
     const night=is_day[i]===0;
@@ -300,7 +285,7 @@ function nightAreas(time,is_day){
   return arr;
 }
 function aggregate3h(d){
-  // ## Agrega dados de 1h para 3h (média/soma/máx)
+  // Aggregate data from 1h to 3h (avg/sum/max)
   const out={ time:[], temperature:[], dewpoint:[], precipitation:[], cloudcover:[], windspeed:[], windgusts:[], winddir:[], pressure:[], waveheight:[], wavedir:[], tideheight:[], is_day:[], cloud_profile:[] };
   const avg=(arr)=>{ const vals=arr.filter(v=>v!=null); if(vals.length===0) return null; return vals.reduce((a,b)=>a+b,0)/vals.length; };
   const sumv=(arr)=>{ const vals=arr.filter(v=>v!=null); if(vals.length===0) return 0; return vals.reduce((a,b)=>a+b,0); };
@@ -335,44 +320,8 @@ function aggregate3h(d){
   }
   return out;
 }
-function filterToSaturday(d){
-  const idxs=[];
-  for(let i=0;i<d.time.length;i++){
-    const dt=toLocalDate(d.time[i]);
-    if(dt.getDay()===6) idxs.push(i);
-  }
-  if(idxs.length===0) return d;
-  const ref=toLocalDate(d.time[idxs[0]]);
-  const y=ref.getFullYear();
-  const m=ref.getMonth();
-  const da=ref.getDate();
-  const dayIdxs=[];
-  for(let i=0;i<d.time.length;i++){
-    const dt=toLocalDate(d.time[i]);
-    if(dt.getFullYear()===y && dt.getMonth()===m && dt.getDate()===da) dayIdxs.push(i);
-  }
-  if(dayIdxs.length===0) return d;
-  const pick=(arr)=>dayIdxs.map(i=>arr[i]);
-  const out={
-    time:pick(d.time),
-    temperature:pick(d.temperature),
-    dewpoint:pick(d.dewpoint),
-    precipitation:pick(d.precipitation),
-    cloudcover:pick(d.cloudcover),
-    windspeed:pick(d.windspeed),
-    windgusts:pick(d.windgusts),
-    winddir:pick(d.winddir),
-    pressure:pick(d.pressure),
-    waveheight:pick(d.waveheight),
-    wavedir:pick(d.wavedir),
-    tideheight:pick(d.tideheight),
-    is_day:pick(d.is_day),
-    cloud_profile:d.cloud_profile && d.cloud_profile.length>0 ? d.cloud_profile.map(level=>pick(level)) : d.cloud_profile
-  };
-  return out;
-}
 function syncLabelHeights(){
-  // ## Alinha altura das legendas laterais com a tabela
+  // Align side legend heights with the table
   const pairs=[['.row-day','tr-day'],['.row-hours','tr-hour'],['.row-sky','tr-sky'],['.row-press','tr-press'],['.row-wind','tr-wind']];
   pairs.forEach(([cls,id])=>{const a=document.querySelector(cls), b=document.getElementById(id); if(a&&b) a.style.height=b.offsetHeight+"px";});
   const rt=document.querySelector('.row-temp'), pt=document.getElementById('panel-temp'); if(rt&&pt) rt.style.height=pt.offsetHeight+"px";
@@ -380,7 +329,7 @@ function syncLabelHeights(){
   const rw=document.querySelector('.row-wave'), pw=document.getElementById('panel-wave'); if(rw&&pw) rw.style.height=pw.offsetHeight+"px";
 }
 function buildTable(d){
-  // ## Gera HTML da tabela (cabeçalhos, ícones, vento, pressão)
+  // Generate table HTML (headers, icons, wind, pressure)
   const trDay=document.getElementById("tr-day");
   const trHour=document.getElementById("tr-hour");
   const trSky=document.getElementById("tr-sky");
@@ -396,13 +345,18 @@ function buildTable(d){
     const th=document.createElement("th"); th.textContent=g.label; th.setAttribute("colspan",String(g.span)); th.classList.add("daysep"); trDay.appendChild(th);
   });
   for(let i=0;i<d.time.length;i++){
-    const iso=d.time[i]; const hh=toLocalDate(iso).getHours().toString().padStart(2,"0");
-    const thHour=document.createElement("th"); thHour.textContent=(parseInt(hh,10)%3===0)? hh : ""; if(i>0) thHour.classList.add("daysep"); trHour.appendChild(thHour);
-    const tdSky=document.createElement("td"); if(i>0) tdSky.classList.add("daysep"); if(d.is_day[i]===0) tdSky.classList.add("cell-night");
+    const iso=d.time[i]; 
+    const dateObj = toLocalDate(iso);
+    const hNum = dateObj.getHours();
+    const hh=hNum.toString().padStart(2,"0");
+    const isNewDay = (hNum === 0);
+
+    const thHour=document.createElement("th"); thHour.textContent=(hNum%3===0)? hh : ""; if(isNewDay) thHour.classList.add("daysep"); trHour.appendChild(thHour);
+    const tdSky=document.createElement("td"); if(isNewDay) tdSky.classList.add("daysep"); if(d.is_day[i]===0) tdSky.classList.add("cell-night");
     const icon=skyIcon(d.is_day[i]===1, d.cloudcover[i], d.precipitation[i]); const sky=document.createElement("div"); sky.className="sky"; sky.textContent=icon; tdSky.appendChild(sky); trSky.appendChild(tdSky);
-    const tdPress=document.createElement("td"); if(i>0) tdPress.classList.add("daysep"); if(d.is_day[i]===0) tdPress.classList.add("cell-night");
+    const tdPress=document.createElement("td"); if(isNewDay) tdPress.classList.add("daysep"); if(d.is_day[i]===0) tdPress.classList.add("cell-night");
     const p=document.createElement("div"); p.className="press"; p.textContent=d.pressure[i]!=null? Math.round(d.pressure[i])+"":"-"; tdPress.appendChild(p); trPress.appendChild(tdPress);
-    const tdWind=document.createElement("td"); if(i>0) tdWind.classList.add("daysep"); if(d.is_day[i]===0) tdWind.classList.add("cell-night");
+    const tdWind=document.createElement("td"); if(isNewDay) tdWind.classList.add("daysep"); if(d.is_day[i]===0) tdWind.classList.add("cell-night");
     const vwind = kmh(d.windspeed[i]);
     const vgust = kmh(d.windgusts[i]);
     tdWind.style.background = '';
@@ -431,6 +385,7 @@ function buildCharts(d, d0){
   const padRight=20; // left pad equals one column to align split lines with table
   document.getElementById("panel-temp").style.width=(totalW+padLeft+padRight)+"px";
   document.getElementById("panel-pc").style.width=(totalW+padLeft+padRight)+"px";
+  document.getElementById("panel-wave").style.width=(totalW+padLeft+padRight)+"px";
 
   const night=nightAreas(d.time,d.is_day);
 
@@ -443,29 +398,124 @@ function buildCharts(d, d0){
   const pmaxNice=niceCeil(pmax);
   const wmax=Math.max(...d.waveheight.filter(v=>v!=null));
   const wmaxNice=niceCeil(wmax);
-  const tidemax=Math.max(...d.tideheight.filter(v=>v!=null));
-  const tidemaxNice=niceCeil(tidemax);
 
   const tStart = toLocalDate(d0.time[0]);
   const day = String(tStart.getUTCDate()).padStart(2,'0');
   const mon = String(tStart.getUTCMonth()+1).padStart(2,'0');
   const hr = String(tStart.getUTCHours()).padStart(2,'0');
   const mn = String(tStart.getUTCMinutes()).padStart(2,'0');
-  const runStr = `${day}.${mon} ${hr}:${mn} UTC`;
+  const runStr = `${day}/${mon} ${hr}:${mn} UTC`;
   document.getElementById('header-info').innerHTML = 
     `Lat: ${locationCfg.latLabel} &nbsp; Lon: ${locationCfg.lonLabel}<br>` +
     `<span style="color:var(--muted)">Rodada: ${runStr}</span>`;
+
+  // ## Calculate Daily Min/Max for MarkPoints
+  const markPointsData = [];
+  const groupedByDay = {};
+  
+  // Group indices by day string (Robust Date Handling)
+  for(let i=0; i<d.time.length; i++){
+      let dateStr = d.time[i];
+      if(dateStr.includes('T')) dateStr = dateStr.split('T')[0];
+      else dateStr = dateStr.split(' ')[0];
+      
+      const dayKey = dateStr;
+      if(!groupedByDay[dayKey]) groupedByDay[dayKey] = [];
+      if(d.temperature[i] != null) groupedByDay[dayKey].push({ val: d.temperature[i], idx: i });
+  }
+
+  // Find min/max for each day
+  Object.keys(groupedByDay).forEach(key => {
+      const points = groupedByDay[key];
+      if(points.length === 0) return;
+      
+      // Find Max (Initialize with first point)
+      let maxP = points[0];
+      points.forEach(p => { if(p.val > maxP.val) maxP = p; });
+      
+      // Find Min (Initialize with first point)
+      let minP = points[0];
+      points.forEach(p => { if(p.val < minP.val) minP = p; });
+
+      // Add Max Point
+      markPointsData.push({
+          coord: [maxP.idx, maxP.val],
+          value: Math.round(maxP.val*10)/10,
+          itemStyle: { color: '#ef4444' },
+          label: { position: 'top', distance: 5, color: '#ef4444', backgroundColor: 'rgba(255,255,255,0.8)', padding:[1,2], borderRadius: 2 }
+      });
+      
+      // Add Min Point (only if distinct index or distinct value, but usually we want both shown even if same day has flat temp)
+      // If max and min are same index (flat line all day?), show both? Or just one?
+      // Usually min and max are at different times. If same time, it overlaps.
+      if (minP.idx !== maxP.idx) {
+          markPointsData.push({
+              coord: [minP.idx, minP.val],
+              value: Math.round(minP.val*10)/10,
+              itemStyle: { color: '#ef4444' },
+              label: { position: 'bottom', distance: 5, color: '#ef4444', backgroundColor: 'rgba(255,255,255,0.8)', padding:[1,2], borderRadius: 2 }
+          });
+      } else {
+         // If min == max (flat line), just showing one is fine, or we can force show min below.
+         // But usually temperature varies.
+         markPointsData.push({
+              coord: [minP.idx, minP.val],
+              value: Math.round(minP.val*10)/10,
+              itemStyle: { color: '#ef4444' },
+              label: { position: 'bottom', distance: 5, color: '#ef4444', backgroundColor: 'rgba(255,255,255,0.8)', padding:[1,2], borderRadius: 2 }
+          });
+      }
+  });
 
   const c1=echarts.init(document.getElementById("panel-temp"),{renderer:"canvas"});
   c1.setOption({
     backgroundColor:"#f7f7f7",
     grid:{left:padLeft,right:padRight,top:36,bottom:50,containLabel:true},
-    xAxis:{type:"category",data:d.time,axisLabel:{show:false},axisLine:{show:false},axisTick:{show:false, interval:(idx,val)=> toLocalDate(val).getHours()%3===0},splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb"}}},
+    xAxis:[
+        {
+            type:"category",
+            data:d.time,
+            axisLabel:{show:false},
+            axisLine:{show:false},
+            axisTick:{show:false, interval:(idx,val)=> toLocalDate(val).getHours()%3===0},
+            splitLine:{
+                show:true, 
+                interval:(idx,val)=> toLocalDate(val).getHours()%3===0, 
+                lineStyle:{color:"#e5e7eb"}
+            }
+        },
+        {
+            type:"category",
+            data:d.time,
+            axisLabel:{show:false},
+            axisLine:{show:false},
+            axisTick:{show:false},
+            splitLine:{
+                show:true, 
+                interval:(idx,val)=> toLocalDate(val).getHours()===0, 
+                lineStyle:{color:"#d1d5db", width: 2, z: 60}
+            }
+        }
+    ],
     yAxis:{name:"", min:ymin, max:ymax, interval:tick, axisLabel:{formatter: '{value} °C', color:"#fca5a5"}, axisLine:{lineStyle:{color:"#d1d5db"}}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
     tooltip:{trigger:"axis",formatter:(it)=>{const i=it[0].dataIndex; return `${d.time[i]}<br/>Temp: ${fmt(d.temperature[i],"°C")} · Td: ${fmt(d.dewpoint[i],"°C")}`}},
     series:[
-      {type:"line", name:"Temperatura", data:d.temperature, smooth:true, symbol:"circle", symbolSize:2, showAllSymbol:true, showSymbol:true, clip:false, zlevel:2, z:3, lineStyle:{color:"#ef4444",width:2}, itemStyle:{opacity:0}, labelLayout:{hideOverlap:false}, emphasis:{label:{show:true}}, label:{show:true, position:"insideTop", distance:6, formatter:(p)=> p.value!=null? `${Math.round(p.value*10)/10}`:"", color:"#ef4444", fontSize:11, fontWeight:"600", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:3}},
-      {type:"line", name:"Td", data:d.dewpoint, smooth:true, symbol:"circle", symbolSize:2, showAllSymbol:true, showSymbol:true, clip:false, zlevel:2, z:3, lineStyle:{color:"#3b82f6",width:1,type:"dashed"}, itemStyle:{opacity:0}, labelLayout:{hideOverlap:false}, emphasis:{label:{show:true}}, label:{show:true, position:"insideBottom", distance:6, formatter:(p)=> p.value!=null? `${Math.round(p.value*10)/10}`:"", color:"#3b82f6", fontSize:11, fontWeight:"600", backgroundColor:"rgba(255,255,255,0.9)", padding:[2,4], borderRadius:3}}
+      {
+        type:"line", name:"Temperatura", data:d.temperature, smooth:true, symbol:"circle", symbolSize:1, showSymbol:false, clip:false, zlevel:2, z:3, lineStyle:{color:"#ef4444",width:2}, itemStyle:{opacity:0}, emphasis:{disabled:true}, 
+        areaStyle: { opacity: 0.15, color: '#ef4444' }, // Add area fill
+        label:{show:false}, // Hide regular 3h labels
+        markPoint: {
+            symbol: 'circle', symbolSize: 4, // Visible dot for min/max
+            label: {
+                show: true,
+                formatter: '{c}°', 
+                fontWeight: 'bold',
+                fontSize: 11
+            },
+            data: markPointsData
+        }
+      },
+      {type:"line", name:"Td", data:d.dewpoint, smooth:true, symbol:"circle", symbolSize:2, showAllSymbol:true, showSymbol:true, clip:false, zlevel:2, z:3, lineStyle:{color:"#3b82f6",width:1,type:"dashed"}, itemStyle:{opacity:0}, labelLayout:{hideOverlap:false}, emphasis:{label:{show:true}}, label:{show:false}}
     ],
     markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
   });
@@ -556,7 +606,11 @@ function buildCharts(d, d0){
             axisLabel:{show:false},
             axisLine:{show:false},
             axisTick:{show:false},
-            splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb", z: 50}} // Grid lines on top
+            splitLine:{
+                show:true, 
+                interval:(idx,val)=> toLocalDate(val).getHours()%3===0, 
+                lineStyle:{color:"#e5e7eb", width: 1} 
+            }
         },
         {   // Axis 1: High-Res Time Axis for Heatmap
             type: 'time',
@@ -566,6 +620,18 @@ function buildCharts(d, d0){
             axisTick: {show: false},
             axisLine: {show: false},
             splitLine: {show: false}
+        },
+        {   // Axis 2: 24h Separator Overlay
+            type: "category",
+            data: d.time,
+            axisLabel: {show: false},
+            axisTick: {show: false},
+            axisLine: {show: false},
+            splitLine:{
+                show: true,
+                interval: (idx, val) => toLocalDate(val).getHours() === 0,
+                lineStyle: { color: "#d1d5db", width: 2, z: 60 }
+            }
         }
     ],
     yAxis: hasProfile ? [
@@ -623,60 +689,124 @@ function buildCharts(d, d0){
     markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
   });
   // CHART: Waves
-  document.getElementById("panel-wave").style.width=(totalW+padLeft+padRight)+"px";
-  const c_wave=echarts.init(document.getElementById("panel-wave"),{renderer:"canvas"});
-  
-  const waveArrows = d.wavedir.map((dir, i) => {
-     if (dir == null || d.waveheight[i] == null) return null;
-     return {
-        value: [d.time[i], d.waveheight[i]],
-        symbolRotate: -(dir + 180) 
-     };
-  });
+  const hasWave = d.waveheight && d.waveheight.some(v => v != null && v > 0);
+  let c_wave = null;
 
-  c_wave.setOption({
-    backgroundColor:"#f7f7f7",
-    grid:{left:padLeft,right:padRight,top:20,bottom:20,containLabel:true},
-    xAxis:{type:"category",data:d.time,axisLabel:{show:false},axisLine:{show:false},axisTick:{show:false},splitLine:{show:true, interval:(idx,val)=> toLocalDate(val).getHours()%3===0, lineStyle:{color:"#e5e7eb"}}},
-    yAxis:{name:"", min:0, max: Math.max(2, wmaxNice), interval: 0.5, axisLabel:{color:"#0891b2"}, axisLine:{show:false}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
-    series:[
-      {
-        name:'Altura', type:'line', smooth:true, showSymbol:false,
-        lineStyle:{width:2, color:'#0891b2'},
-        areaStyle:{color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0, color:'rgba(8,145,178,0.4)'}, {offset:1, color:'rgba(8,145,178,0.1)'}])},
-        data: d.waveheight
-      },
-      {
-        name:'Direção', type:'scatter',
-        symbol: 'path://M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z', 
-        symbolSize: 14,
-        itemStyle: { color: '#0e7490' },
-        data: waveArrows,
-        z: 10
-      }
-    ],
-    markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
-  });
+  if (!hasWave) {
+      const rowWave = document.querySelector('.row-wave');
+      const panelWave = document.getElementById('panel-wave');
+      if(rowWave) rowWave.style.display = 'none';
+      if(panelWave) panelWave.style.display = 'none';
+  } else {
+      const rowWave = document.querySelector('.row-wave');
+      const panelWave = document.getElementById('panel-wave');
+      if(rowWave) rowWave.style.display = '';
+      if(panelWave) panelWave.style.display = '';
 
-  echarts.connect([c1, c3, c_wave]);
+      c_wave=echarts.init(document.getElementById("panel-wave"),{renderer:"canvas"});
+      
+      const waveArrows = d.wavedir.map((dir, i) => {
+         if (dir == null || d.waveheight[i] == null) return null;
+         return {
+            value: [d.time[i], d.waveheight[i]],
+            symbolRotate: -(dir + 180) 
+         };
+      });
+
+      c_wave.setOption({
+        backgroundColor:"#f7f7f7",
+        grid:{left:padLeft,right:padRight,top:20,bottom:20,containLabel:true},
+        xAxis:[
+            {
+                type:"category",
+                data:d.time,
+                axisLabel:{show:false},
+                axisLine:{show:false},
+                axisTick:{show:false},
+                splitLine:{
+                    show:true, 
+                    interval:(idx,val)=> toLocalDate(val).getHours()%3===0, 
+                    lineStyle:{color:"#e5e7eb"}
+                }
+            },
+            {
+                type:"category",
+                data:d.time,
+                axisLabel:{show:false},
+                axisLine:{show:false},
+                axisTick:{show:false},
+                splitLine:{
+                    show:true, 
+                    interval:(idx,val)=> toLocalDate(val).getHours()===0, 
+                    lineStyle:{color:"#d1d5db", width: 2, z: 60}
+                }
+            }
+        ],
+        yAxis:{name:"", min:0, max: Math.max(2, wmaxNice), interval: 0.5, axisLabel:{color:"#0891b2"}, axisLine:{show:false}, splitLine:{lineStyle:{color:"#e5e7eb"}}},
+        series:[
+          {
+            name:'Altura', type:'line', smooth:true, showSymbol:false,
+            lineStyle:{width:2, color:'#0891b2'},
+            areaStyle:{color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0, color:'rgba(8,145,178,0.4)'}, {offset:1, color:'rgba(8,145,178,0.1)'}])},
+            data: d.waveheight
+          },
+          {
+            name:'Direção', type:'scatter',
+            symbol: 'path://M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z', 
+            symbolSize: 14,
+            itemStyle: { color: '#0e7490' },
+            data: waveArrows,
+            z: 10
+          }
+        ],
+        markArea:{silent:true,itemStyle:{color:"rgba(17,24,39,0.25)"},data:night}
+      });
+  }
+
+  const charts = [c1, c3];
+  if(c_wave) charts.push(c_wave);
+  echarts.connect(charts);
 
   syncLabelHeights();
-  window.addEventListener('resize', () => { c1.resize(); c3.resize(); c_wave.resize(); });
-}(async function(){
-  const r=await fetch(locationCfg.csv); const txt=await r.text();
-  const d0=parseCSV(txt);
-  let d=aggregate3h(d0);
-  d=filterToSaturday(d);
-  buildTable(d);
-  buildCharts(d, d0);
-  window.addEventListener('resize', syncLabelHeights);
+  window.addEventListener('resize', () => { 
+      c1.resize(); 
+      c3.resize(); 
+      if(c_wave) c_wave.resize(); 
+  });
+}
+let meteogramData = null;
+(async function(){
+  if (!locationCfg.csv) {
+      document.getElementById('header-info').innerHTML = 
+          `<span style="color:var(--temp); font-weight:bold">Erro: Nenhuma coordenada ou arquivo CSV fornecido.</span><br>` +
+          `<span style="color:var(--muted)">Use ?lat=-23.5&lon=-46.6 na URL.</span>`;
+      return;
+  }
+  try {
+      const r=await fetch(locationCfg.csv); 
+      if(!r.ok) throw new Error("Failed to fetch CSV: " + r.statusText);
+      const txt=await r.text();
+      const d0=parseCSV(txt);
+      
+      if(!d0) throw new Error("Dados inválidos ou vazios.");
+
+      meteogramData = d0;
+      const d=aggregate3h(d0);
+      buildTable(d);
+      buildCharts(d, d0);
+      window.addEventListener('resize', syncLabelHeights);
+  } catch(e) {
+      console.error(e);
+      document.getElementById('header-info').innerHTML = 
+          `<span style="color:var(--temp); font-weight:bold">Erro ao carregar dados: ${e.message}</span>`;
+  }
 })();
 
 function savePng(){
   const wrap = document.querySelector('.wrap');
   const footer = document.querySelector('.footer');
   
-  // ## Salva o estado original
+  // Save original state
   const originalOverflow = wrap.style.overflow;
   const content = document.querySelector('.content');
   const labels = document.querySelector('.labels');
@@ -731,7 +861,31 @@ function savePng(){
     ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, dw, dh);
     
     const a = document.createElement('a');
-    a.download = locationCfg.png;
+    
+    // Custom filename: meteograma_{lat}_{lon}_{date}.png
+    let filename = "meteograma.png";
+    try {
+      const u = new URLSearchParams(window.location.search);
+      // Prioriza URL params, senão tenta limpar o label
+      const lat = u.get('lat') || locationCfg.latLabel.replace(/[^0-9.\-]/g, '');
+      const lon = u.get('lon') || locationCfg.lonLabel.replace(/[^0-9.\-]/g, '');
+      
+      // Data do início da previsão (preferencial) ou data atual
+      let dateStr = new Date().toISOString().split('T')[0];
+      if(meteogramData && meteogramData.time && meteogramData.time.length > 0){
+         // Pega a primeira data disponível nos dados (YYYY-MM-DD)
+         dateStr = meteogramData.time[0].split(/[T ]/)[0];
+      }
+      
+      if(lat && lon && lat !== '-' && lon !== '-') {
+          filename = `meteograma_${lat}_${lon}_${dateStr}.png`;
+      }
+    } catch(e) { 
+      console.error("Error generating filename", e);
+      filename = locationCfg.png || "meteograma.png";
+    }
+    
+    a.download = filename;
     a.href = finalCanvas.toDataURL('image/png');
     a.click();
   });

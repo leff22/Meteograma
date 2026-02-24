@@ -8,9 +8,8 @@ import json
 
 import os
 
-# Define the path to the parent directory (Meteogramas_Monitor)
-# This assumes api.py is in downloads_scripts_cidades
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Define the current directory where api.py and meteogram.html are located
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__, static_folder=BASE_DIR, static_url_path="/")
 CORS(app)  # Enable CORS for all routes
@@ -116,6 +115,7 @@ def enrich_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         b = 237.7
         gamma = (a * T) / (b + T) + np.log(RH)
         df["dewpoint_2m"] = (b * gamma) / (a - gamma)
+    
     if "windspeed_10m" in df.columns and "winddirection_10m" in df.columns:
         rad = np.deg2rad(df["winddirection_10m"])
         df["wind_u10"] = -df["windspeed_10m"] * np.sin(rad)
@@ -125,42 +125,63 @@ def enrich_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 @app.route("/meteogram", methods=["GET"])
 def get_meteogram():
-    try:
-        lat = request.args.get("lat", type=float)
-        lon = request.args.get("lon", type=float)
-        days = request.args.get("days", 7, type=int)
-        data_format = request.args.get("format", "csv")
-        
-        if lat is None or lon is None:
-            return jsonify({"error": "Missing lat or lon parameters"}), 400
-            
-        # Fetch GFS
-        d = fetch_gfs(lat, lon, days=days)
-        df = to_dataframe(d)
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    days = request.args.get("days", 7, type=int)
+    data_format = request.args.get("format", "csv")
 
+    if lat is None or lon is None:
+        return {"error": "Missing lat or lon parameters"}, 400
+
+    try:
+        data = fetch_gfs(lat, lon, days)
+        df = to_dataframe(data)
+
+        # Build lat lon dataframe
+        n = len(data)
+        df_latlon = df[["lat", "lon"]] # Keep lat lon columns for merging later
+        df_latlon["lat"] = np.full(n, lat)
+        df_latlon["lon"] = np.full(n, lon)
+        
         # Fetch Marine data (add waves, etc.)
         try:
-            d_marine = fetch_marine(lat, lon, days=days)
+            d_marine = fetch_marine(lat, lon, days)
             df_marine = to_dataframe(d_marine)
+
             # Merge marine data into main dataframe
             # Use join to align on index (time)
             df = df.join(df_marine, rsuffix="_marine")
+
+            # Merge lat lon data into main dataframe
+            # Use join to align on index (time)
+            df = df.join(df_latlon, rsuffix="_marine")
+
         except Exception as e:
-            print(f"Warning: Could not fetch marine data (might be inland): {e}")
+            return {"error": str(e)}, 500
 
         df = enrich_dataframe(df)
-        
-        if data_format == "json":
-            return jsonify(json.loads(df.to_json(orient="index", date_format="iso")))
-        else:
-            csv_data = df.to_csv(index=True)
-            response = make_response(csv_data)
-            response.headers["Content-Disposition"] = "attachment; filename=meteogram.csv"
-            response.headers["Content-Type"] = "text/csv"
-            return response
+        print(f"Erro :")
+
+        caminho = os.path.join(os.path.dirname(__file__), "meteogram-data.csv")
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        df.to_csv(caminho, index=False)
+
+        try:
+            df.to_csv(caminho, index=False)
+            print("Arquivo salvo com sucesso.")
+        except Exception as e:
+            print(f"Erro ao salvar o arquivo: {e}")
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return {"error": str(e)}, 500
 
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    if data_format == "json":
+        response = make_response(df.to_json())
+        response.headers["Content-Type"] = "application/json"
+        return response, 200
+    else:
+        return df.to_csv(index=True), 200
+
+get_meteogram ()
+## if __name__ == "__main__":
+##    app.run()
