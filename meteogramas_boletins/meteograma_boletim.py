@@ -5,7 +5,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import gridspec
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Patch
+from pytz import timezone
 import matplotlib.path as mpath
 import matplotlib.markers as mmarkers
 from pathlib import Path
@@ -13,6 +14,11 @@ import locale
 from matplotlib.colors import LinearSegmentedColormap
 import json
 import httpx
+try:
+    from scipy.interpolate import RegularGridInterpolator
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 
 # Locale configuration
 try:
@@ -268,19 +274,29 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     interior_hide = (not is_litoral) and city_name in ("Pouso Alegre, MG", "Carapicuíba, SP", "São Carlos, SP")
     
     if interior_hide:
-        gs = gridspec.GridSpec(3, 1, height_ratios=[1.4, 2, 2], hspace=0.1,
+        gs = gridspec.GridSpec(2, 1, height_ratios=[3.4, 2], hspace=0.2,
                                left=0.072, right=0.95, top=0.90, bottom=0.05)
-        ax_table = fig.add_subplot(gs[0], facecolor=C_BG)
-        ax_temp = fig.add_subplot(gs[1], sharex=ax_table, facecolor=C_BG)
-        ax_precip = fig.add_subplot(gs[2], sharex=ax_table, facecolor=C_BG)
+        
+        # Subgrid para Tabela e Temperatura (com hspace menor)
+        gs_top = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0], 
+                                                  height_ratios=[1.4, 2], hspace=0.13)
+        
+        ax_table = fig.add_subplot(gs_top[0], facecolor=C_BG)
+        ax_temp = fig.add_subplot(gs_top[1], sharex=ax_table, facecolor=C_BG)
+        ax_precip = fig.add_subplot(gs[1], sharex=ax_table, facecolor=C_BG)
         ax_wave = None
     else:
-        gs = gridspec.GridSpec(4, 1, height_ratios=[1.4, 2, 2, 1.5], hspace=0.1,
+        gs = gridspec.GridSpec(3, 1, height_ratios=[3.4, 2, 1.5], hspace=0.2,
                                left=0.072, right=0.95, top=0.90, bottom=0.05)
-        ax_table = fig.add_subplot(gs[0], facecolor=C_BG)
-        ax_temp = fig.add_subplot(gs[1], sharex=ax_table, facecolor=C_BG)
-        ax_precip = fig.add_subplot(gs[2], sharex=ax_table, facecolor=C_BG)
-        ax_wave = fig.add_subplot(gs[3], sharex=ax_table, facecolor=C_BG)
+        
+        # Subgrid para Tabela e Temperatura (com hspace menor)
+        gs_top = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0], 
+                                                  height_ratios=[1.4, 2], hspace=0.13)
+        
+        ax_table = fig.add_subplot(gs_top[0], facecolor=C_BG)
+        ax_temp = fig.add_subplot(gs_top[1], sharex=ax_table, facecolor=C_BG)
+        ax_precip = fig.add_subplot(gs[1], sharex=ax_table, facecolor=C_BG)
+        ax_wave = fig.add_subplot(gs[2], sharex=ax_table, facecolor=C_BG)
     
     times = df_agg.index
     step_hours = int(round((times[1]-times[0]).total_seconds()/3600)) if len(times)>1 else 12
@@ -387,25 +403,29 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     for _, group in df_hourly.groupby(df_hourly.index.date):
         t_max = group['temperature_2m'].max()
         idx_max = group['temperature_2m'].idxmax()
-        ax_temp.text(idx_max, t_max + 0.5, f"{t_max:.1f}°", ha='center', va='bottom', fontsize=9, color=C_TEMP, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
+        ax_temp.text(idx_max, t_max + 0.5, f"{t_max:.1f}°", ha='center', va='bottom', fontsize=9, color=C_TEMP, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1), clip_on=True)
         
         t_min = group['temperature_2m'].min()
         idx_min = group['temperature_2m'].idxmin()
-        ax_temp.text(idx_min, t_min - 0.8, f"{t_min:.1f}°", ha='center', va='top', fontsize=9, color=C_TEMP, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
+        ax_temp.text(idx_min, t_min - 0.8, f"{t_min:.1f}°", ha='center', va='top', fontsize=9, color=C_TEMP, fontweight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1), clip_on=True)
         
-    ax_temp.set_ylabel('Temperatura (°C)', color=C_TEMP, fontweight='bold')
+    ax_temp.set_ylabel('Temperatura (°C)', color=C_TEMP, fontweight='bold',fontsize=11)
     ax_temp.tick_params(axis='y', colors=C_TEMP)
 
     # Dewpoint axis
     ax_dew = ax_temp.twinx()
-    t_min = min(df_hourly['temperature_2m'].min(), df_hourly['dewpoint_2m'].min())
-    t_max = max(df_hourly['temperature_2m'].max(), df_hourly['dewpoint_2m'].max())
-    padding = (t_max - t_min) * 0.1
-    y_limits = (t_min - padding, t_max + padding)
+    t_min_data = min(df_hourly['temperature_2m'].min(), df_hourly['dewpoint_2m'].min())
+    t_max_data = max(df_hourly['temperature_2m'].max(), df_hourly['dewpoint_2m'].max())
+    base_padding = (t_max_data - t_min_data) * 0.1
+    pad_top_min = 1.4
+    pad_bottom_min = 1.7
+    pad_top = max(base_padding, pad_top_min)
+    pad_bottom = max(base_padding, pad_bottom_min)
+    y_limits = (t_min_data - pad_bottom, t_max_data + pad_top)
     ax_temp.set_ylim(y_limits)
     ax_dew.set_ylim(y_limits)
     
-    ax_dew.set_ylabel('Ponto de Orvalho (°C)', color=C_DEW, fontweight='bold')
+    ax_dew.set_ylabel('Ponto de Orvalho (°C)', color=C_DEW, fontweight='bold',fontsize=11)
     ax_dew.tick_params(axis='y', colors=C_DEW)
     ax_dew.spines['top'].set_visible(False)
     ax_dew.spines['left'].set_visible(False)
@@ -440,9 +460,61 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     cmap = LinearSegmentedColormap.from_list("cloud_cmap", cmap_colors)
     
     time_nums = mdates.date2num(df_hourly.index)
-    T_grid, A_grid = np.meshgrid(time_nums, alts)
-    
-    ax_precip.pcolormesh(T_grid, A_grid, Z, shading='gouraud', cmap=cmap, vmin=0, vmax=100, alpha=0.9)
+    Z = np.nan_to_num(Z, nan=0.0)
+
+    xmin = float(np.min(time_nums))
+    xmax = float(np.max(time_nums))
+
+    if HAS_SCIPY:
+        try:
+            interp = RegularGridInterpolator((alts, time_nums), Z, method='linear', bounds_error=False, fill_value=0)
+
+            new_alts = np.linspace(min(alts), max(alts), 100)
+            new_times = np.linspace(xmin, xmax, len(time_nums) * 10)
+
+            AA, TT = np.meshgrid(new_alts, new_times, indexing='ij')
+            points = np.array([AA.ravel(), TT.ravel()]).T
+            Z_new_flat = interp(points)
+            Z_to_plot = np.nan_to_num(Z_new_flat.reshape(len(new_alts), len(new_times)), nan=0.0)
+            x_plot = new_times
+            y_plot = new_alts
+        except Exception as e:
+            print(f"Erro na interpolação: {e}")
+            x_plot = time_nums
+            y_plot = alts
+            Z_to_plot = Z
+    else:
+        new_alts = np.linspace(min(alts), max(alts), 100)
+        new_times = np.linspace(xmin, xmax, len(time_nums) * 10)
+
+        Z_time = np.vstack([np.interp(new_times, time_nums, row) for row in Z])
+        Z_to_plot = np.vstack([np.interp(new_alts, alts, Z_time[:, j]) for j in range(Z_time.shape[1])]).T
+        x_plot = new_times
+        y_plot = new_alts
+
+    ax_precip.imshow(
+        Z_to_plot,
+        extent=[float(np.min(x_plot)), float(np.max(x_plot)), float(np.min(y_plot)), float(np.max(y_plot))],
+        aspect='auto',
+        origin='lower',
+        cmap=cmap,
+        vmin=0,
+        vmax=100,
+        alpha=0.9,
+        interpolation='bilinear',
+    )
+
+
+    legend_elements = [
+        Patch(alpha=0, linewidth=0, label='Cobertura de nuvem:'),
+        Patch(facecolor='#f7f7f7', edgecolor='#d1d5db', label='5-25%'),
+        Patch(facecolor='#d1d5db', edgecolor='none', label='25-50%'),
+        Patch(facecolor='#9ca3af', edgecolor='none', label='50-75%'),
+        Patch(facecolor='#4b5563', edgecolor='none', label='75-90%'),
+        Patch(facecolor='#1f2937', edgecolor='none', label='>90%'),
+    ]
+    ax_precip.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.25, 1.15), 
+                     ncol=6, frameon=False, fontsize=9, handlelength=1.0, handleheight=1.0, columnspacing=1.0)
     
     # Axes (corrected order)
     # Create the secondary axis (Rain) FIRST
@@ -450,14 +522,14 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     
     # Configure Clouds axis (Primary) -> RIGHT
     ax_precip.set_ylim(0, 16)
-    ax_precip.set_ylabel('Altitude Nuvens (km)', color=C_MUTED)
+    ax_precip.set_ylabel('Altitude Nuvens (km)', color=C_MUTED,fontsize=11)
     ax_precip.yaxis.set_label_position("right")
     ax_precip.yaxis.tick_right()
     ax_precip.spines['left'].set_visible(False)
     ax_precip.spines['right'].set_visible(True)
     
     # Configure Rain axis (Secondary) -> LEFT
-    ax_rain.set_ylabel('Chuva (mm)', color=C_RAIN, fontweight='bold')
+    ax_rain.set_ylabel('Chuva (mm)', color=C_RAIN, fontweight='bold',fontsize=11)
     ax_rain.yaxis.set_label_position("left")
     ax_rain.yaxis.tick_left()
     ax_rain.spines['right'].set_visible(False)
@@ -487,7 +559,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         ax_wave.fill_between(df_hourly.index, df_hourly['wave_height'], alpha=0.2, color=C_WAVE)
         ax_wave.plot(df_hourly.index, df_hourly['wave_height'], color=C_WAVE, linewidth=2, label='Altura Onda')
         
-        ax_wave.set_ylabel('Ondas (m)', color=C_WAVE, fontweight='bold')
+        ax_wave.set_ylabel('Ondas (m)', color=C_WAVE, fontweight='bold',fontsize=11)
         ax_wave.tick_params(axis='y', colors=C_WAVE)
 
         tide_df = load_tide_table()
@@ -512,7 +584,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
                 # Plot smooth black curve (no scatter)
                 ax_tide.plot(tide_smooth.index, tide_smooth['altura'], color='black', linewidth=1.5, alpha=0.8, zorder=5)
                 
-                ax_tide.set_ylabel('Maré (m)', color='black', fontweight='bold')
+                ax_tide.set_ylabel('Maré (m)', color='black', fontweight='bold',fontsize=11)
                 ax_tide.tick_params(axis='y', colors='black')
                 
                 # Requested scale: -1.5 up to the maximum
@@ -550,7 +622,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
     elif ax_wave is not None and is_litoral:
         msg = "Dados de Onda não disponíveis"
         ax_wave.text(0.5, 0.5, msg, ha='center', va='center', transform=ax_wave.transAxes)
-        ax_wave.set_ylabel('Ondas (m)', color=C_WAVE, fontweight='bold')
+        ax_wave.set_ylabel('Ondas (m)', color=C_WAVE, fontweight='bold',fontsize=11)
         ax_wave.tick_params(axis='y', colors=C_WAVE)
         ax_wave.spines['top'].set_visible(False)
         ax_wave.spines['right'].set_visible(False)
@@ -562,7 +634,7 @@ def draw_meteogram(df_agg, df_hourly, output_path, city_name, lat, lon, is_litor
         ax_wave.spines['right'].set_visible(False)
         ax_wave.spines['left'].set_visible(False)
         ax_wave.spines['bottom'].set_visible(False)
-        ax_wave.set_ylabel('Modelo hidrológico', color=C_MUTED, fontweight='bold')
+        ax_wave.set_ylabel('Modelo hidrológico', color=C_MUTED, fontweight='bold',fontsize=11)
         ax_wave.tick_params(axis='y', colors=C_MUTED)
         ax_wave.text(0.5, 0.5, "Modelo hidrológico (a integrar)", ha='center', va='center', transform=ax_wave.transAxes, color=C_MUTED)
 
